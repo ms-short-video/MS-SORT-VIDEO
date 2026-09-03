@@ -27,6 +27,7 @@ import { UnlimitedStorageModal } from './components/UnlimitedStorageModal';
 import { SecurityShieldModal } from './components/SecurityShieldModal';
 import { BottomNav } from './components/BottomNav';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { SplashScreen } from './components/SplashScreen';
 import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins } from 'lucide-react';
 
 export function deduplicateReels(items: VideoReel[]): VideoReel[] {
@@ -1159,6 +1160,9 @@ export function App() {
 
   return (
     <div className="w-screen h-screen bg-black text-white flex justify-center items-center overflow-hidden font-sans select-none">
+      {/* Full-Screen Branded Launch Splash Screen */}
+      <SplashScreen durationMs={1800} />
+
       {/* Mobile Shell Frame */}
       <div className="relative w-full max-w-md h-full bg-slate-950 flex flex-col shadow-2xl overflow-hidden">
         {/* Floating Upload Progress Badge */}

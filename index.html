@@ -4,18 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>MS Shorts VIP</title>
-    <meta name="theme-color" content="#ff0050" />
+    <meta name="theme-color" content="#ffffff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="MS Shorts" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="description" content="Short Video Streaming App" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="https://dummyimage.com/192x192/ff0050/ffffff.png&text=MS" />
-    <link rel="icon" type="image/png" href="https://dummyimage.com/192x192/ff0050/ffffff.png&text=MS" />
+    <link rel="apple-touch-icon" href="https://dummyimage.com/192x192/ffffff/000000.png&text=MS" />
+    <link rel="icon" type="image/png" href="https://dummyimage.com/192x192/ffffff/000000.png&text=MS" />
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="margin: 0; padding: 0; background-color: #ffffff; color: #000000; overflow: hidden;">
+    <div id="root">
+      <div id="pre-splash" style="position: fixed; inset: 0; background-color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; user-select: none;">
+        <div style="font-size: 6.5rem; font-weight: 900; letter-spacing: -0.05em; color: #000000; line-height: 1;">MS</div>
+        <div style="margin-top: 14px; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.35em; color: #000000; text-transform: uppercase;">SHORTS VIP</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
