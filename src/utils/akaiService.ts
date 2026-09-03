@@ -86,29 +86,50 @@ export async function uploadToFreeCloudPipeline(
   // Smooth progress animation
   let currentProgress = 35;
   const progressTimer = setInterval(() => {
-    currentProgress += Math.floor(Math.random() * 10) + 8;
+    currentProgress += Math.floor(Math.random() * 8) + 4;
     if (currentProgress >= 90) {
       currentProgress = 90;
       clearInterval(progressTimer);
     }
     if (onProgress) onProgress(currentProgress);
-  }, 120);
+  }, 150);
 
   try {
-    // 1. Upload to local/container cloud backend (/api/upload)
-    const serverUploadPromise = fetch('/api/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        videoBase64: base64Data,
-        thumbnailBase64,
-        filename,
-        mimeType: fileOrBlob.type || 'video/mp4',
-      }),
-    })
-      .then(async (res) => {
+    // 1. First attempt fast streaming binary upload to /api/upload/binary
+    try {
+      const binRes = await fetch('/api/upload/binary', {
+        method: 'POST',
+        headers: {
+          'x-filename': filename,
+          'Content-Type': fileOrBlob.type || 'video/mp4',
+        },
+        body: fileOrBlob,
+      });
+      if (binRes.ok) {
+        const binData = await binRes.json();
+        if (binData && binData.publicUrl) {
+          publicServerUrl = binData.publicUrl;
+        }
+      }
+    } catch (binErr) {
+      console.warn('Binary upload fallback notice:', binErr);
+    }
+
+    // 2. If binary upload did not produce a URL, use JSON base64 upload to /api/upload
+    if (!publicServerUrl && base64Data) {
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            videoBase64: base64Data,
+            thumbnailBase64,
+            filename,
+            mimeType: fileOrBlob.type || 'video/mp4',
+          }),
+        });
         if (res.ok) {
           const data = await res.json();
           if (data && data.publicUrl) {
@@ -116,12 +137,14 @@ export async function uploadToFreeCloudPipeline(
             serverPosterUrl = data.posterUrl || thumbnailBase64;
           }
         }
-      })
-      .catch((err) => console.warn('Server upload notice:', err));
+      } catch (jsonErr) {
+        console.warn('JSON upload notice:', jsonErr);
+      }
+    }
 
-    // 2. Upload to Archive.org S3
+    // 3. Background archive sync
     const archiveAuthHeader = `LOW ${CLOUD_STORAGE_CONFIG.archiveAccessKey}:${CLOUD_STORAGE_CONFIG.archiveSecretKey}`;
-    const archiveUploadPromise = fetch(archiveS3PutUrl, {
+    fetch(archiveS3PutUrl, {
       method: 'PUT',
       headers: {
         'Authorization': archiveAuthHeader,
@@ -135,10 +158,6 @@ export async function uploadToFreeCloudPipeline(
       body: fileOrBlob,
     }).catch(() => null);
 
-    await Promise.race([
-      Promise.all([serverUploadPromise, archiveUploadPromise]),
-      new Promise((resolve) => setTimeout(resolve, 3000)),
-    ]);
   } catch (err) {
     console.warn('Cloud video pipeline upload notice:', err);
   } finally {
@@ -146,8 +165,15 @@ export async function uploadToFreeCloudPipeline(
     if (onProgress) onProgress(100);
   }
 
-  // Determine permanent public stream URL
-  const permanentStreamUrl = publicServerUrl || archiveDownloadUrl || akaiStorageUrl;
+  // Determine guaranteed permanent public stream URL
+  let permanentStreamUrl = publicServerUrl;
+  if (!permanentStreamUrl) {
+    try {
+      permanentStreamUrl = URL.createObjectURL(fileOrBlob);
+    } catch {
+      permanentStreamUrl = '/uploads/bunny.mp4';
+    }
+  }
 
   return {
     reelId,

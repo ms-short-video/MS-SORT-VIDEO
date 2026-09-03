@@ -210,10 +210,10 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         preload="auto"
         muted={isGloballyMuted}
         controls={false}
-        crossOrigin="anonymous"
         onDoubleClick={handleDoubleTapLike}
         onError={handleVideoError}
         onPlaying={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
         onEnded={() => {
           loopCountRef.current += 1;
           if (onWatchTimeUpdate) {

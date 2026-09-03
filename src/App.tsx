@@ -78,23 +78,34 @@ export function App() {
     setAuthUser(null);
   };
 
-  // Load initial reels from localStorage or default (purging any legacy dummy reels)
+  // Load initial reels from localStorage or default (purging any legacy dummy / 403 reels)
   const [reels, setReels] = useState<VideoReel[]>(() => {
     try {
       const saved = localStorage.getItem('ms_shorts_vip_reels');
       if (saved) {
         const parsed: VideoReel[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filter out any legacy dummy/mock reels
-          const cleanUserReels = parsed.filter(
-            (r) =>
-              r &&
-              r.id &&
-              !r.id.startsWith('reel-archive-') &&
-              !r.videoUrl?.includes('assets.mixkit.co') &&
-              !r.videoUrl?.includes('vjs.zencdn.net')
-          );
-          return deduplicateReels(cleanUserReels);
+          // Filter out legacy mock reels and fix broken 403 URLs
+          const cleanUserReels = parsed
+            .filter(
+              (r) =>
+                r &&
+                r.id &&
+                !r.id.startsWith('reel-archive-') &&
+                !r.videoUrl?.includes('assets.mixkit.co') &&
+                !r.videoUrl?.includes('vjs.zencdn.net')
+            )
+            .map((r) => {
+              if (
+                r.videoUrl?.includes('commondatastorage.googleapis.com') ||
+                r.videoUrl?.includes('archive.org/download/ms-shorts-vip-') ||
+                r.videoUrl?.includes('archive.org/download/undefined')
+              ) {
+                return { ...r, videoUrl: '/uploads/flower.mp4' };
+              }
+              return r;
+            });
+          return deduplicateReels([...cleanUserReels, ...INITIAL_REELS]);
         }
       }
       return deduplicateReels(INITIAL_REELS);
@@ -599,7 +610,8 @@ export function App() {
     caption: string,
     file?: File | null,
     instantThumbnail?: string,
-    songName?: string
+    songName?: string,
+    category?: ReelCategory
   ) => {
     const timestamp = Date.now();
     const newReelId = `user-reel-${timestamp}-${Math.random().toString(36).substring(2, 7)}`;
@@ -623,6 +635,7 @@ export function App() {
       avatar: currentAvatar,
       uploaderId: currentUid,
       caption,
+      category: category || 'music',
       hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
       songName: songName || `Original Audio - ${currentUsername}`,
       likes: 1,

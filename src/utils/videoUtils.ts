@@ -4,11 +4,13 @@
  */
 
 export const BULLETPROOF_SAMPLE_VIDEOS = [
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+  '/uploads/flower.mp4',
+  '/uploads/sample1.mp4',
+  '/uploads/bunny.mp4',
+  '/uploads/action.mp4',
+  'https://media.w3.org/2010/05/bunny/trailer.mp4',
+  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
 ];
 
 export function getCleanVideoUrl(url: string | undefined | null): string {
@@ -25,6 +27,21 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
   // Uploaded backend uploads
   if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
     return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  }
+
+  // Replace dead Google Cloud Storage sample videos that return HTTP 403
+  if (trimmed.includes('commondatastorage.googleapis.com/gtv-videos-bucket/sample/')) {
+    if (trimmed.includes('BigBuckBunny')) return '/uploads/bunny.mp4';
+    if (trimmed.includes('ForBiggerBlazes')) return '/uploads/sample1.mp4';
+    if (trimmed.includes('ElephantsDream')) return '/uploads/flower.mp4';
+    if (trimmed.includes('WeAreGoingOnBullrun')) return '/uploads/action.mp4';
+    if (trimmed.includes('ForBiggerEscapes')) return '/uploads/sample1.mp4';
+    return '/uploads/flower.mp4';
+  }
+
+  // Replace dead non-existent archive.org dummy download links with local working videos
+  if (trimmed.includes('archive.org/download/ms-shorts-vip-') || trimmed.includes('archive.org/download/undefined')) {
+    return '/uploads/flower.mp4';
   }
 
   // Handle archive.org details link -> direct download MP4 stream

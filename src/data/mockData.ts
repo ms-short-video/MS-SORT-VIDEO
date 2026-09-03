@@ -13,7 +13,7 @@ import {
 export const INITIAL_REELS: VideoReel[] = [
   {
     id: 'reel-vip-music-1',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    videoUrl: '/uploads/flower.mp4',
     poster: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
     username: '@Mehndi_Babu',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -33,7 +33,7 @@ export const INITIAL_REELS: VideoReel[] = [
   },
   {
     id: 'reel-vip-comedy-1',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    videoUrl: '/uploads/sample1.mp4',
     poster: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=600&auto=format&fit=crop&q=80',
     username: '@Comedy_King_Rahul',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
@@ -53,7 +53,7 @@ export const INITIAL_REELS: VideoReel[] = [
   },
   {
     id: 'reel-vip-dance-1',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+    videoUrl: '/uploads/bunny.mp4',
     poster: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
     username: '@Priya_DanceStar',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
@@ -73,7 +73,7 @@ export const INITIAL_REELS: VideoReel[] = [
   },
   {
     id: 'reel-vip-music-2',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
+    videoUrl: '/uploads/action.mp4',
     poster: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
     username: '@Sufi_Vibes_Official',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
@@ -93,7 +93,7 @@ export const INITIAL_REELS: VideoReel[] = [
   },
   {
     id: 'reel-vip-comedy-2',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+    videoUrl: '/uploads/sample1.mp4',
     poster: 'https://images.unsplash.com/photo-1527224857830-43a7acc85260?w=600&auto=format&fit=crop&q=80',
     username: '@Desi_Jokes_Hub',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
@@ -112,7 +112,7 @@ export const INITIAL_REELS: VideoReel[] = [
   },
   {
     id: 'reel-vip-shayari-1',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    videoUrl: '/uploads/flower.mp4',
     poster: 'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=600&auto=format&fit=crop&q=80',
     username: '@Shayari_DilSe',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -131,7 +131,7 @@ export const INITIAL_REELS: VideoReel[] = [
   },
   {
     id: 'reel-vip-action-1',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+    videoUrl: '/uploads/action.mp4',
     poster: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
     username: '@Action_Stunt_Pro',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
