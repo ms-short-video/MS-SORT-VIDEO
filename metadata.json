@@ -1,0 +1,6 @@
+{
+  "name": "MS Shorts VIP Engine",
+  "description": "Full-screen short reels video platform with in-app camera recorder, live camera filters, audio tracks, gallery video upload, direct messaging creator chat, live streaming, virtual gifting, coins wallet, and admin control panel.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
