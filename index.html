@@ -2,17 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>MS Shorts VIP</title>
-    <meta name="theme-color" content="#020617" />
+    <meta name="theme-color" content="#ff0050" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MS Shorts" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="description" content="MS Shorts VIP - Premium Short Video & Live Creator Platform" />
+    <meta name="description" content="Short Video Streaming App" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="https://dummyimage.com/192x192/ff0050/ffffff.png&text=MS" />
+    <link rel="icon" type="image/png" href="https://dummyimage.com/192x192/ff0050/ffffff.png&text=MS" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker
+            .register('/sw.js', { scope: '/' })
+            .then((reg) => {
+              console.log('✅ MS Shorts VIP Service Worker registered with scope:', reg.scope);
+            })
+            .catch((err) => {
+              console.warn('MS Shorts VIP Service Worker registration failed:', err);
+            });
+        });
+      }
+    </script>
   </body>
 </html>
 

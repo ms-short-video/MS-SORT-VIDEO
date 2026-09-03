@@ -26,6 +26,7 @@ import { CreatorWithdrawalModal } from './components/CreatorWithdrawalModal';
 import { UnlimitedStorageModal } from './components/UnlimitedStorageModal';
 import { SecurityShieldModal } from './components/SecurityShieldModal';
 import { BottomNav } from './components/BottomNav';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins } from 'lucide-react';
 
 export function deduplicateReels(items: VideoReel[]): VideoReel[] {
@@ -1176,6 +1177,13 @@ export function App() {
           <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-gradient-to-r from-pink-600 via-rose-600 to-purple-600 border border-pink-300/60 text-white text-xs font-extrabold shadow-2xl backdrop-blur-md flex items-center gap-2 animate-bounce">
             <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
             <span>{algorithmToast}</span>
+          </div>
+        )}
+
+        {/* Floating Top Left PWA Install Button on Home Feed */}
+        {activeTab === 'home' && (
+          <div className="absolute top-4 left-4 z-30 flex items-center gap-2">
+            <PWAInstallButton />
           </div>
         )}
 

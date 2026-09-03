@@ -528,6 +528,32 @@ app.post('/api/withdrawals/:id/status', (req, res) => {
   res.status(404).json({ error: 'Withdrawal request not found' });
 });
 
+// 13. PWA Manifest & Service Worker Endpoints (PWABuilder Compliance)
+app.get('/manifest.json', (req, res, next) => {
+  const manifestPath = process.env.NODE_ENV === 'production'
+    ? path.join(process.cwd(), 'dist', 'manifest.json')
+    : path.join(process.cwd(), 'public', 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.sendFile(manifestPath);
+  }
+  next();
+});
+
+app.get('/sw.js', (req, res, next) => {
+  const swPath = process.env.NODE_ENV === 'production'
+    ? path.join(process.cwd(), 'dist', 'sw.js')
+    : path.join(process.cwd(), 'public', 'sw.js');
+  if (fs.existsSync(swPath)) {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Service-Worker-Allowed', '/');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.sendFile(swPath);
+  }
+  next();
+});
+
 async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
