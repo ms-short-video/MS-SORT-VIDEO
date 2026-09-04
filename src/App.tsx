@@ -148,7 +148,8 @@ export function App() {
   // Modals & Recorders State
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState<boolean>(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState<boolean>(false);
-  const [isGloballyMuted, setIsGloballyMuted] = useState<boolean>(false);
+  // Default to muted for 100% reliable Android APK & mobile WebView autoplay
+  const [isGloballyMuted, setIsGloballyMuted] = useState<boolean>(true);
   const [selectedMusicTrackName, setSelectedMusicTrackName] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [isCameraRecorderOpen, setIsCameraRecorderOpen] = useState<boolean>(false);
@@ -344,33 +345,31 @@ export function App() {
     };
   }, []);
 
-  // Global user interaction listener to unlock audio autoplay in browsers
+  // Global user interaction listener to unlock audio autoplay in browsers & APK WebViews
   useEffect(() => {
     const unlockMedia = () => {
       // Find the active video only
       const activeVideo = document.querySelector<HTMLVideoElement>(`#reel-${reels[activeReelIdx]?.id} video`) || document.querySelector('video');
       if (activeVideo) {
-        if (!isGloballyMuted) {
-          activeVideo.muted = false;
-        }
-        if (activeVideo.paused && activeVideo.readyState >= 1) {
+        if (activeVideo.paused) {
+          activeVideo.muted = true;
           activeVideo.play().catch(() => {});
         }
       }
     };
 
     window.addEventListener('touchstart', unlockMedia, { once: true });
+    window.addEventListener('touchend', unlockMedia, { once: true });
     window.addEventListener('click', unlockMedia, { once: true });
-    window.addEventListener('scroll', unlockMedia, { passive: true, once: true });
     window.addEventListener('pointerdown', unlockMedia, { once: true });
 
     return () => {
       window.removeEventListener('touchstart', unlockMedia);
+      window.removeEventListener('touchend', unlockMedia);
       window.removeEventListener('click', unlockMedia);
-      window.removeEventListener('scroll', unlockMedia);
       window.removeEventListener('pointerdown', unlockMedia);
     };
-  }, [activeReelIdx, reels, isGloballyMuted]);
+  }, [activeReelIdx, reels]);
 
   // Save Notifications to localStorage
   useEffect(() => {

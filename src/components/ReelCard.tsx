@@ -92,37 +92,54 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   // If a video fails to decode, seamlessly switch to high-speed CDN MP4 fallback stream without blocking screen
   const handleVideoError = () => {
     console.warn('Video failed, switching to high-speed direct MP4 CDN fallback for reel:', reel.id);
-    const fallbackUrl = BULLETPROOF_SAMPLE_VIDEOS[Math.floor(Math.random() * BULLETPROOF_SAMPLE_VIDEOS.length)];
-    setVideoSrc(fallbackUrl);
+    const nextFallback = BULLETPROOF_SAMPLE_VIDEOS.find((v) => v !== videoSrc) || BULLETPROOF_SAMPLE_VIDEOS[0];
+    setVideoSrc(nextFallback);
     if (videoRef.current) {
       videoRef.current.load();
-      videoRef.current.play().catch(() => {});
+      videoRef.current.muted = true;
+      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
     }
   };
 
   const safePlay = () => {
     if (!videoRef.current) return;
-    videoRef.current.muted = isGloballyMuted;
-    videoRef.current.play().then(() => {
-      setIsPlaying(true);
-    }).catch(() => {
-      // If browser blocked autoplay with sound, fall back to muted autoplay and retry
-      if (videoRef.current) {
-        videoRef.current.muted = true;
-        videoRef.current.play().then(() => {
+    const video = videoRef.current;
+    try {
+      video.playsInline = true;
+      (video as unknown as { webkitPlaysInline?: boolean }).webkitPlaysInline = true;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
+      video.setAttribute('x5-playsinline', 'true');
+    } catch {
+      // ignore
+    }
+
+    video.muted = isGloballyMuted;
+    const playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
           setIsPlaying(true);
-        }).catch(() => {
-          setIsPlaying(false);
+        })
+        .catch((err) => {
+          // If browser/APK blocked autoplay with sound, fall back to muted autoplay immediately
+          console.warn('WebView sound autoplay blocked, playing muted:', err);
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            videoRef.current.play().then(() => {
+              setIsPlaying(true);
+            }).catch(() => {
+              setIsPlaying(false);
+            });
+          }
         });
-      }
-    });
+    }
   };
 
   const safePause = () => {
     if (!videoRef.current) return;
     try {
       videoRef.current.pause();
-      videoRef.current.muted = true; // guarantee no audio bleed
     } catch {
       // ignore
     }
@@ -147,25 +164,33 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   }, [isActive, videoSrc, isGloballyMuted]);
 
   // Tap anywhere on screen -> toggle sound/play seamlessly
-  const handleCardInteraction = () => {
+  const handleCardInteraction = (e: React.MouseEvent | React.TouchEvent) => {
     if (!videoRef.current) return;
+    const video = videoRef.current;
 
+    // Direct synchronous user gesture play for APK WebViews
     if (isGloballyMuted && onToggleGlobalMute) {
       onToggleGlobalMute();
-      videoRef.current.muted = false;
-      videoRef.current.play().catch(() => {});
-      setIsPlaying(true);
+      video.muted = false;
+      video.play().then(() => setIsPlaying(true)).catch(() => {
+        video.muted = true;
+        video.play().then(() => setIsPlaying(true)).catch(() => {});
+      });
       return;
     }
 
     if (isPlaying) {
       safePause();
     } else {
-      safePlay();
+      video.muted = isGloballyMuted;
+      video.play().then(() => setIsPlaying(true)).catch(() => {
+        video.muted = true;
+        video.play().then(() => setIsPlaying(true)).catch(() => {});
+      });
     }
   };
 
-  const toggleMute = (e: React.MouseEvent) => {
+  const toggleMute = (e: React.MouseEvent | React.TouchEvent) => {
     e.stopPropagation();
     if (onToggleGlobalMute) {
       onToggleGlobalMute();
@@ -189,12 +214,18 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     <div
       id={`reel-${reel.id}`}
       onClick={handleCardInteraction}
+      onTouchEnd={(e) => {
+        // If not scrolling, handle tap to play on Android WebView
+        if (!isPlaying && videoRef.current) {
+          videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
+      }}
       className="relative w-full h-full flex-shrink-0 snap-start bg-black overflow-hidden flex items-center justify-center select-none cursor-pointer"
     >
       {/* Background Poster fallback */}
       {posterImage && (
         <div
-          className="absolute inset-0 bg-cover bg-center filter blur-xl opacity-25 scale-110 pointer-events-none"
+          className="absolute inset-0 bg-cover bg-center opacity-30 scale-110 pointer-events-none"
           style={{ backgroundImage: `url(${posterImage})` }}
         />
       )}
@@ -223,6 +254,24 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         className="w-full h-full object-cover relative z-10"
       />
 
+      {/* Floating Tap to Unmute Banner when muted */}
+      {isGloballyMuted && isPlaying && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onToggleGlobalMute) onToggleGlobalMute();
+            if (videoRef.current) {
+              videoRef.current.muted = false;
+              videoRef.current.play().catch(() => {});
+            }
+          }}
+          className="absolute top-20 right-4 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 border border-white/20 text-white text-xs font-semibold backdrop-blur-md animate-bounce cursor-pointer shadow-lg active:scale-95 transition-all"
+        >
+          <VolumeX className="w-3.5 h-3.5 text-amber-400" />
+          <span>Tap for sound / आवाज़ खोलें</span>
+        </div>
+      )}
+
       {/* Double Tap Heart Animation Overlay */}
       {showHeartAnim && (
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-30">
@@ -235,7 +284,27 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         <div
           onClick={(e) => {
             e.stopPropagation();
-            safePlay();
+            if (videoRef.current) {
+              videoRef.current.muted = isGloballyMuted;
+              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {
+                if (videoRef.current) {
+                  videoRef.current.muted = true;
+                  videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+                }
+              });
+            }
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation();
+            if (videoRef.current) {
+              videoRef.current.muted = isGloballyMuted;
+              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {
+                if (videoRef.current) {
+                  videoRef.current.muted = true;
+                  videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+                }
+              });
+            }
           }}
           className="absolute inset-0 flex items-center justify-center z-20 bg-black/20 cursor-pointer"
         >

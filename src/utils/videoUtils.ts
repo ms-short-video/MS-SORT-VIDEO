@@ -4,13 +4,14 @@
  */
 
 export const BULLETPROOF_SAMPLE_VIDEOS = [
+  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
+  'https://media.w3.org/2010/05/bunny/trailer.mp4',
+  'https://vjs.zencdn.net/v/oceans.mp4',
   '/uploads/flower.mp4',
   '/uploads/sample1.mp4',
   '/uploads/bunny.mp4',
   '/uploads/action.mp4',
-  'https://media.w3.org/2010/05/bunny/trailer.mp4',
-  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-  'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
 ];
 
 export function getCleanVideoUrl(url: string | undefined | null): string {
@@ -24,6 +25,24 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
     return trimmed;
   }
 
+  // Check if running in offline APK file:// wrapper or null origin
+  const isLocalOrApk =
+    typeof window !== 'undefined' &&
+    (window.location.protocol === 'file:' ||
+      window.location.origin === 'null' ||
+      !window.location.origin.startsWith('http'));
+
+  if (isLocalOrApk) {
+    if (trimmed.includes('flower.mp4')) return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+    if (trimmed.includes('bunny.mp4')) return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
+    if (trimmed.includes('sample1.mp4')) return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
+    if (trimmed.includes('action.mp4')) return 'https://vjs.zencdn.net/v/oceans.mp4';
+    if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
+      const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+      return `https://ais-pre-zxavhz74ojcsuwirvfwhcc-631878896873.asia-southeast1.run.app${cleanPath}`;
+    }
+  }
+
   // Uploaded backend uploads
   if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
     return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
@@ -31,17 +50,17 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
 
   // Replace dead Google Cloud Storage sample videos that return HTTP 403
   if (trimmed.includes('commondatastorage.googleapis.com/gtv-videos-bucket/sample/')) {
-    if (trimmed.includes('BigBuckBunny')) return '/uploads/bunny.mp4';
-    if (trimmed.includes('ForBiggerBlazes')) return '/uploads/sample1.mp4';
-    if (trimmed.includes('ElephantsDream')) return '/uploads/flower.mp4';
-    if (trimmed.includes('WeAreGoingOnBullrun')) return '/uploads/action.mp4';
-    if (trimmed.includes('ForBiggerEscapes')) return '/uploads/sample1.mp4';
-    return '/uploads/flower.mp4';
+    if (trimmed.includes('BigBuckBunny')) return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
+    if (trimmed.includes('ForBiggerBlazes')) return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
+    if (trimmed.includes('ElephantsDream')) return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+    if (trimmed.includes('WeAreGoingOnBullrun')) return 'https://vjs.zencdn.net/v/oceans.mp4';
+    if (trimmed.includes('ForBiggerEscapes')) return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
+    return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   }
 
   // Replace dead non-existent archive.org dummy download links with local working videos
   if (trimmed.includes('archive.org/download/ms-shorts-vip-') || trimmed.includes('archive.org/download/undefined')) {
-    return '/uploads/flower.mp4';
+    return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   }
 
   // Handle archive.org details link -> direct download MP4 stream
