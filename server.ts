@@ -187,10 +187,31 @@ let withdrawalRequests: any[] = [
   },
 ];
 
+const CDN_SAMPLE_MAP: Record<string, string> = {
+  flower: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+  sample1: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
+  bunny: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
+  action: 'https://vjs.zencdn.net/v/oceans.mp4',
+  echo: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4',
+};
+
+function cleanServerVideoUrl(url: string | undefined | null): string {
+  if (!url) return CDN_SAMPLE_MAP.flower;
+  if (url.includes('flower.mp4')) return CDN_SAMPLE_MAP.flower;
+  if (url.includes('sample1.mp4')) return CDN_SAMPLE_MAP.sample1;
+  if (url.includes('bunny.mp4')) return CDN_SAMPLE_MAP.bunny;
+  if (url.includes('action.mp4')) return CDN_SAMPLE_MAP.action;
+  if (url.includes('echo')) return CDN_SAMPLE_MAP.echo;
+  if (url.includes('commondatastorage') || url.includes('ms-shorts-vip-') || url.includes('akai.in') || url.startsWith('/uploads/flower') || url.startsWith('/uploads/sample1') || url.startsWith('/uploads/bunny') || url.startsWith('/uploads/action')) {
+    return CDN_SAMPLE_MAP.flower;
+  }
+  return url;
+}
+
 const DEFAULT_INITIAL_REELS = [
   {
     id: 'reel-vip-music-1',
-    videoUrl: '/uploads/flower.mp4',
+    videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     poster: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
     username: '@Mehndi_Babu',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -210,7 +231,7 @@ const DEFAULT_INITIAL_REELS = [
   },
   {
     id: 'reel-vip-comedy-1',
-    videoUrl: '/uploads/sample1.mp4',
+    videoUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
     poster: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=600&auto=format&fit=crop&q=80',
     username: '@Comedy_King_Rahul',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
@@ -230,7 +251,7 @@ const DEFAULT_INITIAL_REELS = [
   },
   {
     id: 'reel-vip-dance-1',
-    videoUrl: '/uploads/bunny.mp4',
+    videoUrl: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
     poster: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
     username: '@Priya_DanceStar',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
@@ -250,7 +271,7 @@ const DEFAULT_INITIAL_REELS = [
   },
   {
     id: 'reel-vip-music-2',
-    videoUrl: '/uploads/action.mp4',
+    videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
     poster: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
     username: '@Sufi_Vibes_Official',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
@@ -270,7 +291,7 @@ const DEFAULT_INITIAL_REELS = [
   },
   {
     id: 'reel-vip-comedy-2',
-    videoUrl: '/uploads/sample1.mp4',
+    videoUrl: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4',
     poster: 'https://images.unsplash.com/photo-1527224857830-43a7acc85260?w=600&auto=format&fit=crop&q=80',
     username: '@Desi_Jokes_Hub',
     avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
@@ -289,7 +310,7 @@ const DEFAULT_INITIAL_REELS = [
   },
   {
     id: 'reel-vip-shayari-1',
-    videoUrl: '/uploads/flower.mp4',
+    videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
     poster: 'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=600&auto=format&fit=crop&q=80',
     username: '@Shayari_DilSe',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -308,7 +329,7 @@ const DEFAULT_INITIAL_REELS = [
   },
   {
     id: 'reel-vip-action-1',
-    videoUrl: '/uploads/action.mp4',
+    videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
     poster: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
     username: '@Action_Stunt_Pro',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
@@ -337,17 +358,14 @@ try {
   cloudReels = [];
 }
 
-// Seed default initial reels if empty or replace legacy broken links
+// Seed default initial reels if empty or clean any legacy broken links
 if (!cloudReels || cloudReels.length === 0) {
   cloudReels = [...DEFAULT_INITIAL_REELS];
 } else {
-  // Purge any dead commondatastorage or dead archive URLs from existing reels database
-  cloudReels = cloudReels.map((r) => {
-    if (r.videoUrl?.includes('commondatastorage.googleapis.com') || r.videoUrl?.includes('archive.org/download/ms-shorts-vip-')) {
-      return { ...r, videoUrl: '/uploads/flower.mp4' };
-    }
-    return r;
-  });
+  cloudReels = cloudReels.map((r) => ({
+    ...r,
+    videoUrl: cleanServerVideoUrl(r.videoUrl),
+  }));
 }
 persistReels();
 
@@ -486,6 +504,13 @@ app.post('/api/upload', (req, res) => {
 
     const filePath = path.join(UPLOADS_DIR, cleanName);
     fs.writeFileSync(filePath, buffer);
+    try {
+      const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), buffer);
+    } catch (e) {
+      // ignore
+    }
 
     // Save thumbnail image if provided
     let posterUrl = '';
@@ -499,6 +524,10 @@ app.post('/api/upload', (req, res) => {
         const thumbName = `thumb_${timestamp}_${randomHex}.jpg`;
         const thumbPath = path.join(UPLOADS_DIR, thumbName);
         fs.writeFileSync(thumbPath, thumbBuffer);
+        try {
+          const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+          fs.writeFileSync(path.join(publicUploadsDir, thumbName), thumbBuffer);
+        } catch (e) {}
         posterUrl = `/uploads/${thumbName}`;
       } catch (err) {
         console.warn('Error saving uploaded thumbnail:', err);
@@ -552,6 +581,11 @@ app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octe
     const cleanName = `reel_${timestamp}_${rawFilename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     const filePath = path.join(UPLOADS_DIR, cleanName);
     fs.writeFileSync(filePath, rawBuffer);
+    try {
+      const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), rawBuffer);
+    } catch (e) {}
 
     const publicUrl = `/uploads/${cleanName}`;
     res.json({

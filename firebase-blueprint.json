@@ -1,0 +1,158 @@
+{
+  "entities": {
+    "reels": {
+      "title": "Video Reel",
+      "description": "Short form video reel entity with cloud stream URL and creator metadata",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the reel"
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "Streamable public URL of the video"
+        },
+        "poster": {
+          "type": "string",
+          "description": "Thumbnail poster image URL"
+        },
+        "username": {
+          "type": "string",
+          "description": "Creator handle"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Creator avatar image URL"
+        },
+        "caption": {
+          "type": "string",
+          "description": "Video caption description"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category: music, dance, comedy, shayari, action"
+        },
+        "songName": {
+          "type": "string",
+          "description": "Audio track title"
+        },
+        "likes": {
+          "type": "number",
+          "description": "Total like count"
+        },
+        "commentsCount": {
+          "type": "number",
+          "description": "Total comments count"
+        },
+        "sharesCount": {
+          "type": "number",
+          "description": "Total shares count"
+        },
+        "isUserUploaded": {
+          "type": "boolean",
+          "description": "Flag if created by app user"
+        },
+        "storageProvider": {
+          "type": "string",
+          "description": "Storage provider identifier"
+        },
+        "uploaderId": {
+          "type": "string",
+          "description": "User ID of the uploader"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["id", "videoUrl", "username", "caption"]
+    },
+    "users": {
+      "title": "User Profile",
+      "description": "Registered app user profile and wallet state",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Unique user ID"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Full display name"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Profile picture URL"
+        },
+        "username": {
+          "type": "string",
+          "description": "User handle"
+        },
+        "coins": {
+          "type": "number",
+          "description": "Wallet virtual coin balance"
+        },
+        "diamonds": {
+          "type": "number",
+          "description": "Creator diamond earnings"
+        },
+        "isVip": {
+          "type": "boolean",
+          "description": "VIP badge status"
+        }
+      },
+      "required": ["uid", "username"]
+    },
+    "comments": {
+      "title": "Reel Comment",
+      "description": "User comment under a specific video reel",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique comment identifier"
+        },
+        "reelId": {
+          "type": "string",
+          "description": "Parent reel ID"
+        },
+        "username": {
+          "type": "string",
+          "description": "Author username"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Author avatar URL"
+        },
+        "text": {
+          "type": "string",
+          "description": "Comment message"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Posting time"
+        }
+      },
+      "required": ["id", "reelId", "username", "text"]
+    }
+  },
+  "firestore": {
+    "/reels/{reelId}": {
+      "schema": "reels",
+      "description": "Global collection of all public and user-uploaded video reels synced across devices"
+    },
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "User account profiles and persistent wallet balance"
+    },
+    "/reels/{reelId}/comments/{commentId}": {
+      "schema": "comments",
+      "description": "Comments left on a specific reel"
+    }
+  }
+}

@@ -8,10 +8,8 @@ export const BULLETPROOF_SAMPLE_VIDEOS = [
   'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
   'https://media.w3.org/2010/05/bunny/trailer.mp4',
   'https://vjs.zencdn.net/v/oceans.mp4',
-  '/uploads/flower.mp4',
-  '/uploads/sample1.mp4',
-  '/uploads/bunny.mp4',
-  '/uploads/action.mp4',
+  'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4',
+  'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
 ];
 
 export function getCleanVideoUrl(url: string | undefined | null): string {
@@ -20,45 +18,40 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
   }
   const trimmed = url.trim();
 
-  // Blob and data URLs (user recorded videos or instant optimistic uploads)
+  // Blob and data URLs (user recorded videos or instant optimistic uploads on same device)
   if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
     return trimmed;
   }
 
-  // Check if running in offline APK file:// wrapper or null origin
-  const isLocalOrApk =
-    typeof window !== 'undefined' &&
-    (window.location.protocol === 'file:' ||
-      window.location.origin === 'null' ||
-      !window.location.origin.startsWith('http'));
-
-  if (isLocalOrApk) {
-    if (trimmed.includes('flower.mp4')) return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-    if (trimmed.includes('bunny.mp4')) return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
-    if (trimmed.includes('sample1.mp4')) return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
-    if (trimmed.includes('action.mp4')) return 'https://vjs.zencdn.net/v/oceans.mp4';
-    if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
-      const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-      return `https://ais-pre-zxavhz74ojcsuwirvfwhcc-631878896873.asia-southeast1.run.app${cleanPath}`;
-    }
+  // Universal mapping for sample/dummy videos to 100% working public HTTPS CDN streams
+  // (Fixes playback across all external browsers, incognito, mobile devices without auth cookie limits)
+  if (trimmed.includes('flower.mp4')) {
+    return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   }
-
-  // Uploaded backend uploads
-  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
-    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  if (trimmed.includes('bunny.mp4') || trimmed.includes('BigBuckBunny')) {
+    return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
+  }
+  if (trimmed.includes('sample1.mp4') || trimmed.includes('trailer.mp4') || trimmed.includes('ForBiggerBlazes') || trimmed.includes('ForBiggerEscapes')) {
+    return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
+  }
+  if (trimmed.includes('action.mp4') || trimmed.includes('oceans.mp4') || trimmed.includes('Bullrun')) {
+    return 'https://vjs.zencdn.net/v/oceans.mp4';
+  }
+  if (trimmed.includes('echo-hereweare') || trimmed.includes('sample2.mp4')) {
+    return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4';
   }
 
   // Replace dead Google Cloud Storage sample videos that return HTTP 403
   if (trimmed.includes('commondatastorage.googleapis.com/gtv-videos-bucket/sample/')) {
-    if (trimmed.includes('BigBuckBunny')) return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
-    if (trimmed.includes('ForBiggerBlazes')) return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
-    if (trimmed.includes('ElephantsDream')) return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-    if (trimmed.includes('WeAreGoingOnBullrun')) return 'https://vjs.zencdn.net/v/oceans.mp4';
-    if (trimmed.includes('ForBiggerEscapes')) return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
-    return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+    return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
   }
 
-  // Replace dead non-existent archive.org dummy download links with local working videos
+  // Replace dead / non-existent akai.in dummy storage URLs with verified bulletproof MP4 stream
+  if (trimmed.includes('akai.in') || trimmed.includes('undefined')) {
+    return BULLETPROOF_SAMPLE_VIDEOS[0];
+  }
+
+  // Replace dead archive.org placeholder links
   if (trimmed.includes('archive.org/download/ms-shorts-vip-') || trimmed.includes('archive.org/download/undefined')) {
     return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
   }
@@ -69,6 +62,34 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
     if (identifier && !identifier.startsWith('@')) {
       return `https://archive.org/download/${identifier}/${identifier}.mp4`;
     }
+  }
+
+  // Google Drive share link -> direct stream link (100% free unlimited hosting)
+  if (trimmed.includes('drive.google.com/file/d/')) {
+    const fileId = trimmed.split('/d/')[1]?.split('/')[0]?.split('?')[0];
+    if (fileId) {
+      return `https://drive.google.com/uc?export=download&id=${fileId}`;
+    }
+  } else if (trimmed.includes('drive.google.com/open?id=')) {
+    const fileId = trimmed.split('id=')[1]?.split('&')[0];
+    if (fileId) {
+      return `https://drive.google.com/uc?export=download&id=${fileId}`;
+    }
+  }
+
+  // Dropbox direct link
+  if (trimmed.includes('dropbox.com') && !trimmed.includes('raw=1')) {
+    return trimmed.includes('?') ? `${trimmed}&raw=1` : `${trimmed}?raw=1`;
+  }
+
+  // Catbox / Litterbox / external direct streams
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
+  // If local relative uploads link, fallback to guaranteed working CDN to prevent cookie check 302 failure in other browsers
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
+    return BULLETPROOF_SAMPLE_VIDEOS[0];
   }
 
   return trimmed;

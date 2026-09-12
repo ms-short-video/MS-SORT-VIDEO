@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ActiveTab, VideoReel, VideoComment, UploadProgress, WalletTransaction, MusicTrack, ArchiveConfig, AppNotification, AuthUser, FeedCategoryFilter, ReelCategory, UserTasteProfile, VirtualGift, WithdrawalRequest, PlatformRevenueStats } from './types';
 import { INITIAL_REELS, INITIAL_COMMENTS, INITIAL_MUSIC_TRACKS, DEFAULT_ARCHIVE_CONFIG, INITIAL_NOTIFICATIONS } from './data/mockData';
-import { signInWithGoogle, logoutUser, DEFAULT_GOOGLE_USER, saveReelToFirestore, subscribeToFirestoreReels } from './lib/firebase';
+import { signInWithGoogle, logoutUser, DEFAULT_GOOGLE_USER, saveReelToFirestore, subscribeToFirestoreReels, seedDefaultReelsIfEmpty } from './lib/firebase';
 import { uploadToFreeCloudPipeline, fetchCloudReels, publishReelToCloud, deleteReelFromCloud, toggleReelLikeOnCloud, fetchAkaiPublicVideos } from './utils/akaiService';
 import { getSavedTasteProfile, recordWatchInteraction, rankReelsForFeed } from './utils/recommendationEngine';
+import { saveVideoBlob } from './utils/localVideoStore';
+import { getCleanVideoUrl } from './utils/videoUtils';
 import { HeaderProgressBadge } from './components/HeaderProgressBadge';
 import { FeedCategoryBar } from './components/FeedCategoryBar';
 import { AlgorithmProfileModal } from './components/AlgorithmProfileModal';
@@ -28,7 +30,7 @@ import { SecurityShieldModal } from './components/SecurityShieldModal';
 import { BottomNav } from './components/BottomNav';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SplashScreen } from './components/SplashScreen';
-import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins } from 'lucide-react';
+import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins, Cloud } from 'lucide-react';
 
 export function deduplicateReels(items: VideoReel[]): VideoReel[] {
   const seen = new Set<string>();
@@ -92,18 +94,10 @@ export function App() {
                 r &&
                 r.id &&
                 !r.id.startsWith('reel-archive-') &&
-                !r.videoUrl?.includes('assets.mixkit.co') &&
-                !r.videoUrl?.includes('vjs.zencdn.net')
+                !r.videoUrl?.includes('assets.mixkit.co')
             )
             .map((r) => {
-              if (
-                r.videoUrl?.includes('commondatastorage.googleapis.com') ||
-                r.videoUrl?.includes('archive.org/download/ms-shorts-vip-') ||
-                r.videoUrl?.includes('archive.org/download/undefined')
-              ) {
-                return { ...r, videoUrl: '/uploads/flower.mp4' };
-              }
-              return r;
+              return { ...r, videoUrl: getCleanVideoUrl(r.videoUrl) };
             });
           return deduplicateReels([...cleanUserReels, ...INITIAL_REELS]);
         }
@@ -322,10 +316,13 @@ export function App() {
     }
   }, [reels]);
 
-  // Subscribe to real-time Firestore database for akai.in cloud sync
+  // Subscribe to real-time Firestore database for global cloud sync
   useEffect(() => {
     let unsubs: (() => void) | undefined;
     try {
+      // Ensure cloud database has initial seed if fresh
+      seedDefaultReelsIfEmpty(INITIAL_REELS);
+
       unsubs = subscribeToFirestoreReels((remoteReels) => {
         if (remoteReels && remoteReels.length > 0) {
           setReels((prev) => deduplicateReels([...remoteReels, ...prev.filter((p) => !remoteReels.some((r) => r.id === p.id))]));
@@ -344,32 +341,6 @@ export function App() {
       }
     };
   }, []);
-
-  // Global user interaction listener to unlock audio autoplay in browsers & APK WebViews
-  useEffect(() => {
-    const unlockMedia = () => {
-      // Find the active video only
-      const activeVideo = document.querySelector<HTMLVideoElement>(`#reel-${reels[activeReelIdx]?.id} video`) || document.querySelector('video');
-      if (activeVideo) {
-        if (activeVideo.paused) {
-          activeVideo.muted = true;
-          activeVideo.play().catch(() => {});
-        }
-      }
-    };
-
-    window.addEventListener('touchstart', unlockMedia, { once: true });
-    window.addEventListener('touchend', unlockMedia, { once: true });
-    window.addEventListener('click', unlockMedia, { once: true });
-    window.addEventListener('pointerdown', unlockMedia, { once: true });
-
-    return () => {
-      window.removeEventListener('touchstart', unlockMedia);
-      window.removeEventListener('touchend', unlockMedia);
-      window.removeEventListener('click', unlockMedia);
-      window.removeEventListener('pointerdown', unlockMedia);
-    };
-  }, [activeReelIdx, reels]);
 
   // Save Notifications to localStorage
   useEffect(() => {
@@ -654,12 +625,18 @@ export function App() {
     setUploadProgress({ isUploading: true, percentage: 15 });
 
     if (file) {
+      // Instantly cache video in device's IndexedDB for guaranteed zero-failure local playback
+      saveVideoBlob(newReelId, file).catch(() => {});
+
       uploadToFreeCloudPipeline(
         file,
         { caption, username: currentUsername, songName: optimisticReel.songName },
         (pct) => setUploadProgress({ isUploading: true, percentage: pct })
       ).then((uploadResult) => {
-        const finalUrl = uploadResult.playbackUrl || videoUrl;
+        let finalUrl = uploadResult.playbackUrl || videoUrl;
+        if (!finalUrl || finalUrl.includes('akai.in')) {
+          finalUrl = videoUrl;
+        }
         const updatedReel: VideoReel = {
           ...optimisticReel,
           videoUrl: finalUrl,
@@ -1219,6 +1196,21 @@ export function App() {
           </button>
         )}
 
+        {/* Floating Top Cloud Storage Status Button on Home Feed */}
+        {activeTab === 'home' && (
+          <button
+            onClick={() => setIsStorageModalOpen(true)}
+            className="absolute top-4 right-4 z-30 p-2.5 rounded-full bg-black/50 border border-emerald-500/40 text-white backdrop-blur-md hover:bg-black/80 transition-all active:scale-95 shadow-xl flex items-center justify-center group"
+            title="100% Free Unlimited Video Storage Hub"
+          >
+            <Cloud className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black"></span>
+            </span>
+          </button>
+        )}
+
         {/* Floating Category Navigation Bar on Home Feed */}
         {activeTab === 'home' && (
           <div className="absolute top-16 left-0 right-0 z-30 flex justify-center pointer-events-auto">
@@ -1598,6 +1590,7 @@ export function App() {
           onPostLive={handlePostLive}
           onOpenCameraRecorder={() => setIsCameraRecorderOpen(true)}
           onGoLiveClick={handleGoLiveClick}
+          onOpenStorageModal={() => setIsStorageModalOpen(true)}
         />
 
         {/* Camera Video Recorder Modal */}

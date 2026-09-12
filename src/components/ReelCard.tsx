@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { VideoReel } from '../types';
 import { getCleanVideoUrl, BULLETPROOF_SAMPLE_VIDEOS } from '../utils/videoUtils';
+import { getVideoDataUrl } from '../utils/localVideoStore';
 import {
   Heart,
   MessageCircle,
@@ -46,6 +47,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   onWatchTimeUpdate,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const lastTouchTimeRef = useRef<number>(0);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [isFollowing, setIsFollowing] = useState<boolean>(reel.isFollowing || false);
@@ -84,109 +86,137 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     };
   }, [isActive, reel.id]);
 
+  // Robust video source resolution (IndexedDB cache for user uploads, fallback for external URLs)
   useEffect(() => {
-    const clean = getCleanVideoUrl(reel.videoUrl);
-    setVideoSrc(clean);
-  }, [reel.videoUrl]);
+    let isCancelled = false;
+    const resolveVideo = async () => {
+      if (reel.isUserUploaded || reel.id.startsWith('user-reel')) {
+        try {
+          const localData = await getVideoDataUrl(reel.id);
+          if (localData && !isCancelled) {
+            setVideoSrc(localData);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      const clean = getCleanVideoUrl(reel.videoUrl);
+      if (!isCancelled) {
+        setVideoSrc(clean);
+      }
+    };
+    resolveVideo();
+    return () => {
+      isCancelled = true;
+    };
+  }, [reel.videoUrl, reel.id, reel.isUserUploaded]);
 
-  // If a video fails to decode, seamlessly switch to high-speed CDN MP4 fallback stream without blocking screen
+  // If a video fails to decode or play, immediately switch to direct MP4 fallback
   const handleVideoError = () => {
-    console.warn('Video failed, switching to high-speed direct MP4 CDN fallback for reel:', reel.id);
+    console.warn('Video failed to load or decode for reel:', reel.id, videoSrc);
     const nextFallback = BULLETPROOF_SAMPLE_VIDEOS.find((v) => v !== videoSrc) || BULLETPROOF_SAMPLE_VIDEOS[0];
     setVideoSrc(nextFallback);
     if (videoRef.current) {
+      videoRef.current.src = nextFallback;
       videoRef.current.load();
       videoRef.current.muted = true;
       videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
     }
   };
 
-  const safePlay = () => {
-    if (!videoRef.current) return;
+  // Reload video element whenever videoSrc changes to ensure browser decodes clean media
+  useEffect(() => {
     const video = videoRef.current;
+    if (!video || !videoSrc) return;
     try {
-      video.playsInline = true;
-      (video as unknown as { webkitPlaysInline?: boolean }).webkitPlaysInline = true;
-      video.setAttribute('playsinline', 'true');
-      video.setAttribute('webkit-playsinline', 'true');
-      video.setAttribute('x5-playsinline', 'true');
+      video.src = videoSrc;
+      video.load();
+      if (isActive) {
+        video.muted = isGloballyMuted;
+        video.play().then(() => setIsPlaying(true)).catch(() => {
+          video.muted = true;
+          video.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+        });
+      }
     } catch {
       // ignore
     }
+  }, [videoSrc]);
 
-    video.muted = isGloballyMuted;
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          setIsPlaying(true);
-        })
-        .catch((err) => {
-          // If browser/APK blocked autoplay with sound, fall back to muted autoplay immediately
-          console.warn('WebView sound autoplay blocked, playing muted:', err);
-          if (videoRef.current) {
-            videoRef.current.muted = true;
-            videoRef.current.play().then(() => {
+  // Auto-play when active in viewport with loop and inline flags
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (isActive) {
+      try {
+        video.playsInline = true;
+        (video as unknown as { webkitPlaysInline?: boolean }).webkitPlaysInline = true;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('x5-playsinline', 'true');
+      } catch {
+        // ignore
+      }
+
+      video.muted = isGloballyMuted;
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+          })
+          .catch((err) => {
+            console.warn('Autoplay sound blocked, switching to muted play:', err);
+            video.muted = true;
+            video.play().then(() => {
               setIsPlaying(true);
             }).catch(() => {
               setIsPlaying(false);
             });
-          }
-        });
-    }
-  };
-
-  const safePause = () => {
-    if (!videoRef.current) return;
-    try {
-      videoRef.current.pause();
-    } catch {
-      // ignore
-    }
-    setIsPlaying(false);
-  };
-
-  // Auto-play on active in viewport with loop and inline flags
-  // When active changes, if active, unmute (if global mute off) & play from start, if inactive, pause immediately
-  useEffect(() => {
-    if (!videoRef.current) return;
-
-    if (isActive) {
-      try {
-        videoRef.current.currentTime = 0;
-      } catch {
-        // ignore
+          });
       }
-      safePlay();
     } else {
-      safePause();
+      video.pause();
+      setIsPlaying(false);
     }
-  }, [isActive, videoSrc, isGloballyMuted]);
+  }, [isActive]);
 
-  // Tap anywhere on screen -> toggle sound/play seamlessly
+  // Keep mute state in sync without restarting video
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isGloballyMuted;
+    }
+  }, [isGloballyMuted]);
+
+  // Clean tap handler for screen / play toggle with mobile ghost click debouncing
   const handleCardInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-
-    // Direct synchronous user gesture play for APK WebViews
-    if (isGloballyMuted && onToggleGlobalMute) {
-      onToggleGlobalMute();
-      video.muted = false;
-      video.play().then(() => setIsPlaying(true)).catch(() => {
-        video.muted = true;
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
-      });
+    if (e.type === 'click' && Date.now() - lastTouchTimeRef.current < 400) {
       return;
     }
+    if (e.type === 'touchend') {
+      lastTouchTimeRef.current = Date.now();
+    }
 
-    if (isPlaying) {
-      safePause();
-    } else {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.paused || !isPlaying) {
       video.muted = isGloballyMuted;
-      video.play().then(() => setIsPlaying(true)).catch(() => {
-        video.muted = true;
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
-      });
+      const p = video.play();
+      if (p !== undefined) {
+        p.then(() => setIsPlaying(true)).catch(() => {
+          video.muted = true;
+          video.play().then(() => setIsPlaying(true)).catch(() => {
+            video.load();
+            video.play().then(() => setIsPlaying(true)).catch(() => {});
+          });
+        });
+      }
+    } else {
+      video.pause();
+      setIsPlaying(false);
     }
   };
 
@@ -214,12 +244,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     <div
       id={`reel-${reel.id}`}
       onClick={handleCardInteraction}
-      onTouchEnd={(e) => {
-        // If not scrolling, handle tap to play on Android WebView
-        if (!isPlaying && videoRef.current) {
-          videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-        }
-      }}
+      onTouchEnd={handleCardInteraction}
       className="relative w-full h-full flex-shrink-0 snap-start bg-black overflow-hidden flex items-center justify-center select-none cursor-pointer"
     >
       {/* Background Poster fallback */}
@@ -279,38 +304,25 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         </div>
       )}
 
-      {/* Play/Pause Overlay Icon when paused */}
+      {/* Play/Pause Overlay Icon when paused with direct click gesture */}
       {!isPlaying && (
         <div
           onClick={(e) => {
             e.stopPropagation();
-            if (videoRef.current) {
-              videoRef.current.muted = isGloballyMuted;
-              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {
-                if (videoRef.current) {
-                  videoRef.current.muted = true;
-                  videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-                }
-              });
-            }
+            handleCardInteraction(e);
           }}
           onTouchEnd={(e) => {
             e.stopPropagation();
-            if (videoRef.current) {
-              videoRef.current.muted = isGloballyMuted;
-              videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {
-                if (videoRef.current) {
-                  videoRef.current.muted = true;
-                  videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-                }
-              });
-            }
+            handleCardInteraction(e);
           }}
-          className="absolute inset-0 flex items-center justify-center z-20 bg-black/20 cursor-pointer"
+          className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/30 cursor-pointer select-none group"
         >
-          <div className="w-16 h-16 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-white backdrop-blur-sm shadow-xl animate-pulse">
-            <Play className="w-8 h-8 fill-current ml-1" />
+          <div className="w-18 h-18 rounded-full bg-black/75 border-2 border-white/40 flex items-center justify-center text-white backdrop-blur-md shadow-2xl group-hover:scale-110 active:scale-95 transition-all">
+            <Play className="w-9 h-9 fill-current ml-1 text-pink-400" />
           </div>
+          <span className="mt-3 px-3 py-1 rounded-full bg-black/60 border border-white/20 text-white/90 text-xs font-semibold backdrop-blur-sm shadow-md">
+            Tap to Play / वीडियो चलाएं ▶
+          </span>
         </div>
       )}
 

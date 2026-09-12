@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { X, Upload, Video, Sparkles, Film, Camera, Radio, FileVideo, Music, Laugh, Flame, Heart, Zap } from 'lucide-react';
-import { generateVideoThumbnail } from '../utils/videoUtils';
+import { X, Upload, Video, Sparkles, Film, Camera, Radio, FileVideo, Music, Laugh, Flame, Heart, Zap, Cloud, HardDrive, ShieldCheck, Link2 } from 'lucide-react';
+import { generateVideoThumbnail, getCleanVideoUrl } from '../utils/videoUtils';
 import { ReelCategory } from '../types';
 
 interface UploadModalProps {
@@ -17,6 +17,7 @@ interface UploadModalProps {
   ) => void;
   onOpenCameraRecorder: () => void;
   onGoLiveClick: () => void;
+  onOpenStorageModal?: () => void;
 }
 
 export const UploadModal: React.FC<UploadModalProps> = ({
@@ -26,6 +27,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   onPostLive,
   onOpenCameraRecorder,
   onGoLiveClick,
+  onOpenStorageModal,
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -59,7 +61,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   const handlePost = async () => {
     setIsProcessing(true);
-    let finalUrl = archiveUrlInput.trim();
+    let rawUrl = archiveUrlInput.trim();
+    let finalUrl = rawUrl ? getCleanVideoUrl(rawUrl) : '';
 
     if (!finalUrl && selectedFile) {
       finalUrl = previewUrl || '';
@@ -70,7 +73,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       return;
     }
 
-    const finalCaption = caption.trim() || 'New reel uploaded & synced to cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu';
+    const finalCaption = caption.trim() || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu';
 
     onPostLive(finalUrl, finalCaption, selectedFile, thumbnailPreview || undefined, initialSongName || undefined, selectedCategory);
 
@@ -85,10 +88,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in text-white select-none">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-5 text-white shadow-2xl flex flex-col gap-4 animate-scale-up relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/85 backdrop-blur-md animate-fade-in text-white select-none">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 text-white shadow-2xl flex flex-col gap-3.5 animate-scale-up relative max-h-[95vh] overflow-y-auto">
         {/* Modal Header */}
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-gradient-to-tr from-pink-500 to-indigo-500 text-white shadow-md">
               <Film className="w-5 h-5" />
@@ -107,6 +110,33 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* 100% Free Unlimited Storage Active Banner */}
+        <div
+          onClick={() => {
+            if (onOpenStorageModal) {
+              onClose();
+              onOpenStorageModal();
+            }
+          }}
+          className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 hover:bg-emerald-950/60 transition-all cursor-pointer flex items-center justify-between gap-2"
+        >
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              <Cloud className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-black text-white">100% Free Unlimited Storage</span>
+                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-500 text-black">
+                  ₹0 COST
+                </span>
+              </div>
+              <p className="text-[10px] text-emerald-300/80">No subscription, no paid keys, permanent multi-cloud sync</p>
+            </div>
+          </div>
+          <span className="text-[10px] font-bold text-emerald-400 hover:underline shrink-0">Hub &gt;</span>
         </div>
 
         {/* Hidden File Input for Gallery Video */}
@@ -199,26 +229,31 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 font-extrabold text-sm text-white shadow-lg shadow-pink-500/30 hover:opacity-90 active:scale-98 transition-all flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4" />
-              <span>{isProcessing ? 'Processing...' : 'Publish Video Reel Now'}</span>
+              <span>{isProcessing ? 'Processing & Syncing...' : 'Publish Video Reel (Free Cloud)'}</span>
             </button>
           </div>
         ) : (
           /* NO VIDEO SELECTED - OPTIONS MENU */
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             {/* Action 1: Upload from Gallery / Files */}
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="group p-4 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-pink-500/50 hover:bg-slate-950 transition-all cursor-pointer flex items-center gap-3.5 active:scale-98"
+              className="group p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-pink-500/50 hover:bg-slate-950 transition-all cursor-pointer flex items-center gap-3 active:scale-98"
             >
-              <div className="p-3 rounded-xl bg-pink-500/10 text-pink-400 group-hover:bg-pink-500 group-hover:text-white transition-colors">
+              <div className="p-2.5 rounded-xl bg-pink-500/10 text-pink-400 group-hover:bg-pink-500 group-hover:text-white transition-colors">
                 <Upload className="w-5 h-5" />
               </div>
               <div className="flex-1">
-                <h4 className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">
-                  Upload Video from Device
-                </h4>
+                <div className="flex items-center gap-1.5">
+                  <h4 className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">
+                    Upload Video from Device
+                  </h4>
+                  <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Unlimited
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-400">
-                  Select any MP4, WebM or MOV video from phone/PC
+                  Select any MP4, WebM or MOV video from phone/PC (Free Multi-Cloud Storage)
                 </p>
               </div>
             </div>
@@ -229,9 +264,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 onClose();
                 onOpenCameraRecorder();
               }}
-              className="group p-4 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-purple-500/50 hover:bg-slate-950 transition-all cursor-pointer flex items-center gap-3.5 active:scale-98"
+              className="group p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-purple-500/50 hover:bg-slate-950 transition-all cursor-pointer flex items-center gap-3 active:scale-98"
             >
-              <div className="p-3 rounded-xl bg-purple-500/10 text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
+              <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400 group-hover:bg-purple-500 group-hover:text-white transition-colors">
                 <Camera className="w-5 h-5" />
               </div>
               <div className="flex-1">
@@ -255,9 +290,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 onClose();
                 onGoLiveClick();
               }}
-              className="group p-4 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-rose-500/50 hover:bg-slate-950 transition-all cursor-pointer flex items-center gap-3.5 active:scale-98"
+              className="group p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-rose-500/50 hover:bg-slate-950 transition-all cursor-pointer flex items-center gap-3 active:scale-98"
             >
-              <div className="p-3 rounded-xl bg-rose-500/10 text-rose-400 group-hover:bg-rose-500 group-hover:text-white transition-colors">
+              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 group-hover:bg-rose-500 group-hover:text-white transition-colors">
                 <Radio className="w-5 h-5" />
               </div>
               <div className="flex-1">
@@ -275,27 +310,38 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               </div>
             </div>
 
-            {/* Archive.org Direct Stream URL Input */}
+            {/* Free Cloud Video Link (Google Drive / Archive.org / Web MP4) */}
             <div className="pt-2 border-t border-slate-800/80 flex flex-col gap-1.5">
-              <label className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                <FileVideo className="w-3.5 h-3.5 text-amber-400" />
-                <span>Or Paste Direct MP4 / Archive.org Stream URL:</span>
+              <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1 text-amber-300">
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>Paste Free Cloud Video URL (Drive / Archive.org / MP4):</span>
+                </span>
+                <span className="text-[10px] text-emerald-400 font-mono font-bold">100% Free</span>
               </label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={archiveUrlInput}
                   onChange={(e) => setArchiveUrlInput(e.target.value)}
-                  placeholder="https://archive.org/download/..."
+                  placeholder="Paste Google Drive, Archive.org, or MP4 link..."
                   className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                 />
                 <button
                   onClick={handlePost}
                   disabled={!archiveUrlInput.trim() || isProcessing}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-extrabold text-xs transition-colors shrink-0"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-extrabold text-xs transition-colors shrink-0 flex items-center gap-1"
                 >
-                  Stream
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Publish</span>
                 </button>
+              </div>
+              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 pt-0.5">
+                <span className="text-slate-500">Supports:</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Google Drive</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Archive.org</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Dropbox</span>
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">Direct MP4</span>
               </div>
             </div>
           </div>
