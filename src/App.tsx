@@ -32,11 +32,34 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { SplashScreen } from './components/SplashScreen';
 import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins, Cloud } from 'lucide-react';
 
+export function isDummyReel(r: any): boolean {
+  if (!r || !r.id) return true;
+  const id = String(r.id);
+  if (id.startsWith('reel-archive-') || id.startsWith('reel-vip-')) return true;
+  const url = String(r.videoUrl || '').toLowerCase();
+  if (!url) return false;
+  if (
+    url.includes('oceans.mp4') ||
+    url.includes('bunny') ||
+    url.includes('flower.mp4') ||
+    url.includes('mediaelement') ||
+    url.includes('echo-hereweare') ||
+    url.includes('trailer.mp4') ||
+    url.includes('sample1.mp4') ||
+    url.includes('sample2.mp4') ||
+    url.includes('commondatastorage') ||
+    url.includes('assets.mixkit.co')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function deduplicateReels(items: VideoReel[]): VideoReel[] {
   const seen = new Set<string>();
   const result: VideoReel[] = [];
   for (const item of items) {
-    if (!item || !item.id) continue;
+    if (!item || !item.id || isDummyReel(item)) continue;
     if (!seen.has(item.id)) {
       seen.add(item.id);
       result.push(item);
@@ -80,38 +103,34 @@ export function App() {
     setAuthUser(null);
   };
 
-  // Load initial reels from localStorage or default (purging any legacy dummy / 403 reels)
+  // Load initial reels from localStorage or cloud (purging ALL dummy/sample reels)
   const [reels, setReels] = useState<VideoReel[]>(() => {
     try {
       const saved = localStorage.getItem('ms_shorts_vip_reels');
       if (saved) {
         const parsed: VideoReel[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Filter out legacy mock reels and fix broken 403 URLs
           const cleanUserReels = parsed
-            .filter(
-              (r) =>
-                r &&
-                r.id &&
-                !r.id.startsWith('reel-archive-') &&
-                !r.videoUrl?.includes('assets.mixkit.co')
-            )
+            .filter((r) => !isDummyReel(r))
             .map((r) => {
               return { ...r, videoUrl: getCleanVideoUrl(r.videoUrl) };
             });
-          return deduplicateReels([...cleanUserReels, ...INITIAL_REELS]);
+          if (cleanUserReels.length > 0) {
+            return deduplicateReels(cleanUserReels);
+          }
         }
       }
-      return deduplicateReels(INITIAL_REELS);
+      return [];
     } catch {
-      return deduplicateReels(INITIAL_REELS);
+      return [];
     }
   });
 
-  // Automatically persist reels to localStorage on every state change
+  // Automatically persist clean user reels to localStorage on every state change
   useEffect(() => {
     try {
-      localStorage.setItem('ms_shorts_vip_reels', JSON.stringify(reels));
+      const cleanOnly = reels.filter((r) => !isDummyReel(r));
+      localStorage.setItem('ms_shorts_vip_reels', JSON.stringify(cleanOnly));
     } catch (e) {
       // ignore
     }
@@ -142,8 +161,8 @@ export function App() {
   // Modals & Recorders State
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState<boolean>(false);
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState<boolean>(false);
-  // Default to muted for 100% reliable Android APK & mobile WebView autoplay
-  const [isGloballyMuted, setIsGloballyMuted] = useState<boolean>(true);
+  // Automatic sound enabled by default as requested
+  const [isGloballyMuted, setIsGloballyMuted] = useState<boolean>(false);
   const [selectedMusicTrackName, setSelectedMusicTrackName] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [isCameraRecorderOpen, setIsCameraRecorderOpen] = useState<boolean>(false);
@@ -284,8 +303,12 @@ export function App() {
     const syncCloudReels = async () => {
       try {
         const cloudData = await fetchCloudReels();
-        if (cloudData && cloudData.length > 0) {
-          setReels((prev) => deduplicateReels([...cloudData, ...prev.filter((p) => !cloudData.some((c) => c.id === p.id))]));
+        if (cloudData && Array.isArray(cloudData)) {
+          const cleanCloud = cloudData.filter((c) => !isDummyReel(c));
+          setReels((prev) => {
+            const cleanPrev = prev.filter((p) => !isDummyReel(p));
+            return deduplicateReels([...cleanCloud, ...cleanPrev.filter((p) => !cleanCloud.some((c) => c.id === p.id))]);
+          });
         }
       } catch (err) {
         console.warn('Notice syncing cloud reels:', err);
@@ -316,16 +339,40 @@ export function App() {
     }
   }, [reels]);
 
+  // Automatically unmute audio on user's first interaction anywhere in the app
+  useEffect(() => {
+    const handleFirstGesture = () => {
+      setIsGloballyMuted(false);
+      window.removeEventListener('click', handleFirstGesture);
+      window.removeEventListener('touchend', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+    };
+    window.addEventListener('click', handleFirstGesture, { once: true });
+    window.addEventListener('touchend', handleFirstGesture, { once: true });
+    window.addEventListener('keydown', handleFirstGesture, { once: true });
+    return () => {
+      window.removeEventListener('click', handleFirstGesture);
+      window.removeEventListener('touchend', handleFirstGesture);
+      window.removeEventListener('keydown', handleFirstGesture);
+    };
+  }, []);
+
   // Subscribe to real-time Firestore database for global cloud sync
   useEffect(() => {
     let unsubs: (() => void) | undefined;
     try {
-      // Ensure cloud database has initial seed if fresh
-      seedDefaultReelsIfEmpty(INITIAL_REELS);
-
       unsubs = subscribeToFirestoreReels((remoteReels) => {
         if (remoteReels && remoteReels.length > 0) {
-          setReels((prev) => deduplicateReels([...remoteReels, ...prev.filter((p) => !remoteReels.some((r) => r.id === p.id))]));
+          const cleanRemote = remoteReels
+            .filter((r) => !isDummyReel(r))
+            .map((r) => ({ ...r, videoUrl: getCleanVideoUrl(r.videoUrl) }));
+          if (cleanRemote.length > 0) {
+            setReels((prev) => {
+              const cleanPrev = prev.filter((p) => !isDummyReel(p));
+              const userUploaded = cleanPrev.filter((p) => p.isUserUploaded && !cleanRemote.some((r) => r.id === p.id));
+              return deduplicateReels([...cleanRemote, ...userUploaded]);
+            });
+          }
         }
       });
     } catch (err) {
@@ -633,9 +680,9 @@ export function App() {
         { caption, username: currentUsername, songName: optimisticReel.songName },
         (pct) => setUploadProgress({ isUploading: true, percentage: pct })
       ).then((uploadResult) => {
-        let finalUrl = uploadResult.playbackUrl || videoUrl;
-        if (!finalUrl || finalUrl.includes('akai.in')) {
-          finalUrl = videoUrl;
+        let finalUrl = uploadResult.playbackUrl || uploadResult.videoUrl || '';
+        if (!finalUrl || finalUrl.startsWith('blob:')) {
+          finalUrl = uploadResult.videoUrl || videoUrl;
         }
         const updatedReel: VideoReel = {
           ...optimisticReel,
@@ -644,7 +691,9 @@ export function App() {
         };
         setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
         publishReelToCloud(updatedReel);
-        saveReelToFirestore(updatedReel);
+        if (finalUrl && !finalUrl.startsWith('blob:')) {
+          saveReelToFirestore(updatedReel);
+        }
         setUploadProgress({ isUploading: true, percentage: 100 });
         setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
 
@@ -736,7 +785,10 @@ export function App() {
         { caption, username: currentUsername, songName, filterApplied: filterName },
         (pct) => setUploadProgress({ isUploading: true, percentage: pct })
       ).then((uploadResult) => {
-        const finalUrl = uploadResult.playbackUrl || videoUrl;
+        let finalUrl = uploadResult.playbackUrl || uploadResult.videoUrl || '';
+        if (!finalUrl || finalUrl.startsWith('blob:')) {
+          finalUrl = uploadResult.videoUrl || videoUrl;
+        }
         const updatedReel: VideoReel = {
           ...optimisticReel,
           videoUrl: finalUrl,
@@ -744,7 +796,9 @@ export function App() {
         };
         setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
         publishReelToCloud(updatedReel);
-        saveReelToFirestore(updatedReel);
+        if (finalUrl && !finalUrl.startsWith('blob:')) {
+          saveReelToFirestore(updatedReel);
+        }
         setUploadProgress({ isUploading: true, percentage: 100 });
         setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
 
@@ -1238,17 +1292,29 @@ export function App() {
                     <Film className="w-10 h-10 text-pink-400" />
                   </div>
                   <h2 className="text-2xl font-black tracking-tight text-white mb-2">
-                    No Videos in "{activeCategoryFilter}"
+                    {reels.length === 0 ? 'कोई डमी वीडियो नहीं है 🎬' : `No Videos in "${activeCategoryFilter}"`}
                   </h2>
                   <p className="text-xs text-slate-400 max-w-xs mb-6 leading-relaxed">
-                    No videos found matching this filter right now. Switch back to For You to watch all videos!
+                    {reels.length === 0
+                      ? 'सारे डमी वीडियो हटा दिए गए हैं। केवल आपके अपलोड किए गए असली वीडियो ही यहाँ दिखेंगे। अपना वीडियो अपलोड करें!'
+                      : 'No videos found matching this filter right now. Switch back to For You to watch all videos!'}
                   </p>
-                  <button
-                    onClick={() => handleSelectCategoryFilter('for-you')}
-                    className="py-3 px-6 rounded-2xl bg-gradient-to-r from-pink-600 to-indigo-600 text-white font-bold text-xs shadow-lg active:scale-95 transition-all"
-                  >
-                    View All Videos (For You)
-                  </button>
+                  {reels.length === 0 ? (
+                    <button
+                      onClick={() => setIsUploadModalOpen(true)}
+                      className="py-3.5 px-7 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-600 to-amber-500 text-white font-extrabold text-sm shadow-xl shadow-pink-500/30 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <Upload className="w-4 h-4 text-white" />
+                      <span>Upload Your Video / वीडियो अपलोड करें 🚀</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleSelectCategoryFilter('for-you')}
+                      className="py-3 px-6 rounded-2xl bg-gradient-to-r from-pink-600 to-indigo-600 text-white font-bold text-xs shadow-lg active:scale-95 transition-all cursor-pointer"
+                    >
+                      View All Videos (For You)
+                    </button>
+                  )}
                 </div>
               ) : (
                 displayReels.map((reel, idx) => (

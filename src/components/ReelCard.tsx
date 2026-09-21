@@ -1,6 +1,6 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { VideoReel } from '../types';
-import { getCleanVideoUrl, BULLETPROOF_SAMPLE_VIDEOS } from '../utils/videoUtils';
+import { getCleanVideoUrl } from '../utils/videoUtils';
 import { getVideoDataUrl } from '../utils/localVideoStore';
 import {
   Heart,
@@ -86,43 +86,34 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     };
   }, [isActive, reel.id]);
 
-  // Robust video source resolution (IndexedDB cache for user uploads, fallback for external URLs)
-  useEffect(() => {
-    let isCancelled = false;
-    const resolveVideo = async () => {
-      if (reel.isUserUploaded || reel.id.startsWith('user-reel')) {
-        try {
-          const localData = await getVideoDataUrl(reel.id);
-          if (localData && !isCancelled) {
-            setVideoSrc(localData);
-            return;
-          }
-        } catch {
-          // ignore
-        }
-      }
-      const clean = getCleanVideoUrl(reel.videoUrl);
-      if (!isCancelled) {
-        setVideoSrc(clean);
-      }
-    };
-    resolveVideo();
-    return () => {
-      isCancelled = true;
-    };
-  }, [reel.videoUrl, reel.id, reel.isUserUploaded]);
+  const [videoLoadError, setVideoLoadError] = useState(false);
 
-  // If a video fails to decode or play, immediately switch to direct MP4 fallback
+  const resolveVideo = useCallback(async () => {
+    setVideoLoadError(false);
+    if (reel.isUserUploaded || reel.id.startsWith('user-reel')) {
+      try {
+        const localData = await getVideoDataUrl(reel.id);
+        if (localData) {
+          setVideoSrc(localData);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    const clean = getCleanVideoUrl(reel.videoUrl);
+    setVideoSrc(clean);
+  }, [reel.id, reel.videoUrl, reel.isUserUploaded]);
+
+  useEffect(() => {
+    resolveVideo();
+  }, [resolveVideo]);
+
+  // If a video fails to decode or play, handle gracefully without inserting dummy videos
   const handleVideoError = () => {
     console.warn('Video failed to load or decode for reel:', reel.id, videoSrc);
-    const nextFallback = BULLETPROOF_SAMPLE_VIDEOS.find((v) => v !== videoSrc) || BULLETPROOF_SAMPLE_VIDEOS[0];
-    setVideoSrc(nextFallback);
-    if (videoRef.current) {
-      videoRef.current.src = nextFallback;
-      videoRef.current.load();
-      videoRef.current.muted = true;
-      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-    }
+    setVideoLoadError(true);
+    setIsPlaying(false);
   };
 
   // Reload video element whenever videoSrc changes to ensure browser decodes clean media
@@ -183,6 +174,8 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     }
   }, [isActive]);
 
+  const [volumeIndicator, setVolumeIndicator] = useState<'muted' | 'unmuted' | null>(null);
+
   // Keep mute state in sync without restarting video
   useEffect(() => {
     if (videoRef.current) {
@@ -190,9 +183,9 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     }
   }, [isGloballyMuted]);
 
-  // Clean tap handler for screen / play toggle with mobile ghost click debouncing
+  // Clean single-tap handler: play with audio if paused, or toggle mute if playing
   const handleCardInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    if (e.type === 'click' && Date.now() - lastTouchTimeRef.current < 400) {
+    if (e.type === 'click' && Date.now() - lastTouchTimeRef.current < 350) {
       return;
     }
     if (e.type === 'touchend') {
@@ -203,29 +196,46 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     if (!video) return;
 
     if (video.paused || !isPlaying) {
-      video.muted = isGloballyMuted;
-      const p = video.play();
-      if (p !== undefined) {
-        p.then(() => setIsPlaying(true)).catch(() => {
-          video.muted = true;
-          video.play().then(() => setIsPlaying(true)).catch(() => {
-            video.load();
-            video.play().then(() => setIsPlaying(true)).catch(() => {});
-          });
-        });
+      // Single tap resumes playback AND starts audio sound immediately!
+      video.muted = false;
+      video.volume = 1.0;
+      if (isGloballyMuted && onToggleGlobalMute) {
+        onToggleGlobalMute();
       }
+      video
+        .play()
+        .then(() => {
+          setIsPlaying(true);
+          setVolumeIndicator('unmuted');
+          setTimeout(() => setVolumeIndicator(null), 800);
+        })
+        .catch(() => {
+          // If browser policy requires initial muted start before sound gesture
+          video.muted = true;
+          video
+            .play()
+            .then(() => {
+              setIsPlaying(true);
+              setTimeout(() => {
+                video.muted = false;
+                video.volume = 1.0;
+              }, 50);
+            })
+            .catch(() => {
+              video.load();
+              video.play().then(() => setIsPlaying(true)).catch(() => {});
+            });
+        });
     } else {
-      video.pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const toggleMute = (e: React.MouseEvent | React.TouchEvent) => {
-    e.stopPropagation();
-    if (onToggleGlobalMute) {
-      onToggleGlobalMute();
-    } else if (videoRef.current) {
-      videoRef.current.muted = !videoRef.current.muted;
+      // Single tap toggles mute / unmute seamlessly!
+      const nextMuted = !video.muted;
+      video.muted = nextMuted;
+      video.volume = 1.0;
+      if (onToggleGlobalMute) {
+        onToggleGlobalMute();
+      }
+      setVolumeIndicator(nextMuted ? 'muted' : 'unmuted');
+      setTimeout(() => setVolumeIndicator(null), 800);
     }
   };
 
@@ -279,21 +289,16 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         className="w-full h-full object-cover relative z-10"
       />
 
-      {/* Floating Tap to Unmute Banner when muted */}
-      {isGloballyMuted && isPlaying && (
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onToggleGlobalMute) onToggleGlobalMute();
-            if (videoRef.current) {
-              videoRef.current.muted = false;
-              videoRef.current.play().catch(() => {});
-            }
-          }}
-          className="absolute top-20 right-4 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 border border-white/20 text-white text-xs font-semibold backdrop-blur-md animate-bounce cursor-pointer shadow-lg active:scale-95 transition-all"
-        >
-          <VolumeX className="w-3.5 h-3.5 text-amber-400" />
-          <span>Tap for sound / आवाज़ खोलें</span>
+      {/* Instant Volume Feedback Indicator on Single Tap */}
+      {volumeIndicator && (
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-30">
+          <div className="w-16 h-16 rounded-full bg-black/75 backdrop-blur-md border border-white/30 flex items-center justify-center shadow-2xl transition-all scale-105">
+            {volumeIndicator === 'unmuted' ? (
+              <Volume2 className="w-8 h-8 text-emerald-400" />
+            ) : (
+              <VolumeX className="w-8 h-8 text-rose-400" />
+            )}
+          </div>
         </div>
       )}
 
@@ -304,7 +309,32 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         </div>
       )}
 
-      {/* Play/Pause Overlay Icon when paused with direct click gesture */}
+      {/* Video Load / Playback Notice */}
+      {videoLoadError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-25 bg-black/85 backdrop-blur-md p-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-pink-500/20 border border-pink-500/40 flex items-center justify-center mb-3">
+            <Play className="w-8 h-8 text-pink-400" />
+          </div>
+          <p className="text-white font-bold text-sm mb-1">{reel.caption || 'User Video'}</p>
+          <p className="text-gray-400 text-xs mb-4">वीडियो लोड हो रहा है या पुनः प्रयास करें</p>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setVideoLoadError(false);
+              resolveVideo();
+              if (videoRef.current) {
+                videoRef.current.load();
+                videoRef.current.play().catch(() => {});
+              }
+            }}
+            className="px-5 py-2 rounded-full bg-gradient-to-r from-pink-600 to-rose-600 text-white font-bold text-xs shadow-lg active:scale-95 cursor-pointer"
+          >
+            Retry / दोबारा चलाएं 🔄
+          </button>
+        </div>
+      )}
+
+      {/* Play Overlay Icon when paused with single-tap gesture */}
       {!isPlaying && (
         <div
           onClick={(e) => {
@@ -315,18 +345,15 @@ export const ReelCard: React.FC<ReelCardProps> = ({
             e.stopPropagation();
             handleCardInteraction(e);
           }}
-          className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/30 cursor-pointer select-none group"
+          className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-black/35 cursor-pointer select-none group"
         >
-          <div className="w-18 h-18 rounded-full bg-black/75 border-2 border-white/40 flex items-center justify-center text-white backdrop-blur-md shadow-2xl group-hover:scale-110 active:scale-95 transition-all">
-            <Play className="w-9 h-9 fill-current ml-1 text-pink-400" />
+          <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-pink-600 to-rose-500 border-2 border-white/80 flex items-center justify-center text-white backdrop-blur-md shadow-2xl group-hover:scale-110 active:scale-95 transition-all">
+            <Play className="w-10 h-10 fill-current ml-1 text-white" />
           </div>
-          <span className="mt-3 px-3 py-1 rounded-full bg-black/60 border border-white/20 text-white/90 text-xs font-semibold backdrop-blur-sm shadow-md">
-            Tap to Play / वीडियो चलाएं ▶
-          </span>
         </div>
       )}
 
-      {/* Top Bar Controls */}
+      {/* Top Bar - Clean VIP Badge without redundant floating buttons */}
       <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
         <button
           onClick={(e) => {
@@ -341,27 +368,6 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           <span className="text-[9px] font-black px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950">
             VIP LEVELS
           </span>
-        </button>
-
-        {isGloballyMuted && isActive && (
-          <div
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onToggleGlobalMute) onToggleGlobalMute();
-            }}
-            className="cursor-pointer px-3 py-1 rounded-full bg-pink-600/90 text-white text-[10px] font-extrabold border border-pink-400/50 shadow-lg backdrop-blur-md animate-bounce flex items-center gap-1.5 pointer-events-auto"
-          >
-            <VolumeX className="w-3.5 h-3.5 text-white" />
-            <span>🔊 Tap Screen to Unmute</span>
-          </div>
-        )}
-
-        <button
-          onClick={toggleMute}
-          className="p-2.5 rounded-full bg-black/50 border border-white/20 text-white backdrop-blur-md hover:bg-black/70 transition-all active:scale-95 pointer-events-auto"
-          title={isGloballyMuted ? 'Unmute' : 'Mute'}
-        >
-          {isGloballyMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
         </button>
       </div>
 

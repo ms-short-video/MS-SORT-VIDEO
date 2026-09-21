@@ -63,8 +63,9 @@ export async function saveReelToFirestore(reel: VideoReel): Promise<void> {
     const reelRef = doc(db, 'reels', reel.id);
     let validUrl = reel.videoUrl?.trim() || '';
     if (!validUrl || validUrl.includes('undefined')) {
-      validUrl = '/uploads/flower.mp4';
+      return;
     }
+    validUrl = getCleanVideoUrl(validUrl);
 
     const schemaDoc = {
       id: reel.id,
@@ -109,6 +110,22 @@ export function subscribeToFirestoreReels(onReelsUpdate: (reels: VideoReel[]) =>
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as VideoReel;
           if (data && data.id) {
+            // Filter out any legacy dummy reels
+            if (data.id.startsWith('reel-vip-') || data.id.startsWith('reel-archive-')) {
+              return;
+            }
+            if (
+              data.videoUrl?.includes('oceans.mp4') ||
+              data.videoUrl?.includes('bunny.mp4') ||
+              data.videoUrl?.includes('flower.mp4') ||
+              data.videoUrl?.includes('trailer.mp4') ||
+              data.videoUrl?.includes('big_buck_bunny.mp4') ||
+              data.videoUrl?.includes('echo-hereweare.mp4') ||
+              data.videoUrl?.includes('sample1.mp4') ||
+              data.videoUrl?.includes('sample2.mp4')
+            ) {
+              return;
+            }
             data.videoUrl = getCleanVideoUrl(data.videoUrl);
             remoteReels.push(data);
           }

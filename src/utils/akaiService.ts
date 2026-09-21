@@ -1,6 +1,6 @@
 import { VideoReel } from '../types';
 import { blobToDataUrl } from './localVideoStore';
-import { generateVideoThumbnail } from './videoUtils';
+import { generateVideoThumbnail, getApiBaseUrl } from './videoUtils';
 
 export const CLOUD_STORAGE_CONFIG = {
   // Archive.org S3 API Unlimited Free Video Storage
@@ -98,7 +98,7 @@ export async function uploadToFreeCloudPipeline(
   try {
     // 1. First attempt fast streaming binary upload to /api/upload/binary
     try {
-      const binRes = await fetch('/api/upload/binary', {
+      const binRes = await fetch(`${getApiBaseUrl()}/api/upload/binary`, {
         method: 'POST',
         headers: {
           'x-filename': filename,
@@ -119,7 +119,7 @@ export async function uploadToFreeCloudPipeline(
     // 2. If binary upload did not produce a URL, use JSON base64 upload to /api/upload
     if (!publicServerUrl && base64Data) {
       try {
-        const res = await fetch('/api/upload', {
+        const res = await fetch(`${getApiBaseUrl()}/api/upload`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -188,13 +188,16 @@ export async function uploadToFreeCloudPipeline(
     if (onProgress) onProgress(100);
   }
 
-  // Guaranteed universal public stream URL
+  // Guaranteed universal public stream URL (prioritize global CDN for 100% cross-device playback)
   let permanentStreamUrl = publicCdnUrl || publicServerUrl;
+  if (permanentStreamUrl && permanentStreamUrl.startsWith('/uploads/')) {
+    permanentStreamUrl = `${getApiBaseUrl()}${permanentStreamUrl}`;
+  }
   if (!permanentStreamUrl) {
     try {
       permanentStreamUrl = URL.createObjectURL(fileOrBlob);
     } catch {
-      permanentStreamUrl = '/uploads/bunny.mp4';
+      permanentStreamUrl = base64Data || '';
     }
   }
 
@@ -217,7 +220,7 @@ export const uploadToAkaiServer = uploadToFreeCloudPipeline;
  */
 export async function fetchCloudReels(): Promise<VideoReel[]> {
   try {
-    const res = await fetch('/api/reels');
+    const res = await fetch(`${getApiBaseUrl()}/api/reels`);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -235,7 +238,7 @@ export async function fetchCloudReels(): Promise<VideoReel[]> {
  */
 export async function publishReelToCloud(reel: VideoReel): Promise<boolean> {
   try {
-    const res = await fetch('/api/reels', {
+    const res = await fetch(`${getApiBaseUrl()}/api/reels`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reel),
@@ -252,7 +255,7 @@ export async function publishReelToCloud(reel: VideoReel): Promise<boolean> {
  */
 export async function deleteReelFromCloud(reelId: string): Promise<boolean> {
   try {
-    const res = await fetch(`/api/reels/${reelId}`, {
+    const res = await fetch(`${getApiBaseUrl()}/api/reels/${reelId}`, {
       method: 'DELETE',
     });
     return res.ok;
@@ -267,7 +270,7 @@ export async function deleteReelFromCloud(reelId: string): Promise<boolean> {
  */
 export async function toggleReelLikeOnCloud(reelId: string, isLiked: boolean): Promise<void> {
   try {
-    await fetch(`/api/reels/${reelId}/like`, {
+    await fetch(`${getApiBaseUrl()}/api/reels/${reelId}/like`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isLiked }),
@@ -305,7 +308,7 @@ export interface StorageStatusResponse {
  */
 export async function checkUnlimitedStorageStatus(): Promise<StorageStatusResponse | null> {
   try {
-    const res = await fetch('/api/storage/status');
+    const res = await fetch(`${getApiBaseUrl()}/api/storage/status`);
     if (res.ok) {
       return await res.json();
     }

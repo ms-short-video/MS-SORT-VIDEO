@@ -3,18 +3,23 @@
  * Handles clean stream resolution, instant frame capture thumbnails, and video playback safety
  */
 
-export const BULLETPROOF_SAMPLE_VIDEOS = [
-  'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-  'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
-  'https://media.w3.org/2010/05/bunny/trailer.mp4',
-  'https://vjs.zencdn.net/v/oceans.mp4',
-  'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4',
-  'https://filesamples.com/samples/video/mp4/sample_640x360.mp4',
-];
+export const CLOUD_SERVER_ORIGIN = 'https://ais-pre-zxavhz74ojcsuwirvfwhcc-631878896873.asia-southeast1.run.app';
+
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location) {
+    const origin = window.location.origin;
+    if (origin && origin.startsWith('http') && !origin.includes('localhost:') && !origin.includes('file:')) {
+      return origin;
+    }
+  }
+  return CLOUD_SERVER_ORIGIN;
+}
+
+export const BULLETPROOF_SAMPLE_VIDEOS: string[] = [];
 
 export function getCleanVideoUrl(url: string | undefined | null): string {
   if (!url || typeof url !== 'string' || !url.trim()) {
-    return BULLETPROOF_SAMPLE_VIDEOS[0];
+    return '';
   }
   const trimmed = url.trim();
 
@@ -23,48 +28,13 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
     return trimmed;
   }
 
-  // Universal mapping for sample/dummy videos to 100% working public HTTPS CDN streams
-  // (Fixes playback across all external browsers, incognito, mobile devices without auth cookie limits)
-  if (trimmed.includes('flower.mp4')) {
-    return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-  }
-  if (trimmed.includes('bunny.mp4') || trimmed.includes('BigBuckBunny')) {
-    return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
-  }
-  if (trimmed.includes('sample1.mp4') || trimmed.includes('trailer.mp4') || trimmed.includes('ForBiggerBlazes') || trimmed.includes('ForBiggerEscapes')) {
-    return 'https://media.w3.org/2010/05/bunny/trailer.mp4';
-  }
-  if (trimmed.includes('action.mp4') || trimmed.includes('oceans.mp4') || trimmed.includes('Bullrun')) {
-    return 'https://vjs.zencdn.net/v/oceans.mp4';
-  }
-  if (trimmed.includes('echo-hereweare') || trimmed.includes('sample2.mp4')) {
-    return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4';
+  // Preserve and resolve user-uploaded videos from /uploads/ directory to absolute HTTPS stream
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
+    const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    return `${getApiBaseUrl()}${cleanPath}`;
   }
 
-  // Replace dead Google Cloud Storage sample videos that return HTTP 403
-  if (trimmed.includes('commondatastorage.googleapis.com/gtv-videos-bucket/sample/')) {
-    return 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4';
-  }
-
-  // Replace dead / non-existent akai.in dummy storage URLs with verified bulletproof MP4 stream
-  if (trimmed.includes('akai.in') || trimmed.includes('undefined')) {
-    return BULLETPROOF_SAMPLE_VIDEOS[0];
-  }
-
-  // Replace dead archive.org placeholder links
-  if (trimmed.includes('archive.org/download/ms-shorts-vip-') || trimmed.includes('archive.org/download/undefined')) {
-    return 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-  }
-
-  // Handle archive.org details link -> direct download MP4 stream
-  if (trimmed.includes('archive.org/details/')) {
-    const identifier = trimmed.split('archive.org/details/')[1]?.split('/')[0]?.split('?')[0]?.trim();
-    if (identifier && !identifier.startsWith('@')) {
-      return `https://archive.org/download/${identifier}/${identifier}.mp4`;
-    }
-  }
-
-  // Google Drive share link -> direct stream link (100% free unlimited hosting)
+  // Google Drive share link -> direct stream link
   if (trimmed.includes('drive.google.com/file/d/')) {
     const fileId = trimmed.split('/d/')[1]?.split('/')[0]?.split('?')[0];
     if (fileId) {
@@ -82,14 +52,9 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
     return trimmed.includes('?') ? `${trimmed}&raw=1` : `${trimmed}?raw=1`;
   }
 
-  // Catbox / Litterbox / external direct streams
+  // Direct HTTPS/HTTP streams
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     return trimmed;
-  }
-
-  // If local relative uploads link, fallback to guaranteed working CDN to prevent cookie check 302 failure in other browsers
-  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
-    return BULLETPROOF_SAMPLE_VIDEOS[0];
   }
 
   return trimmed;

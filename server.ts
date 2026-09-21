@@ -17,19 +17,29 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=*, microphone=*, display-capture=*');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
   res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
   next();
 });
 
 // 2. In-Memory Anti-DDoS / Rate Limiter Protection
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute window
-const MAX_REQUESTS_PER_WINDOW = 300; // 300 requests per minute per IP
+const MAX_REQUESTS_PER_WINDOW = 500; // 500 requests per minute per IP
 
 app.use((req, res, next) => {
-  // Allow health & static assets freely
-  if (req.path.startsWith('/uploads') || req.path.startsWith('/assets') || req.path === '/api/health') {
+  // Allow health, static assets, uploads, and reels API freely
+  if (
+    req.path.startsWith('/uploads') ||
+    req.path.startsWith('/assets') ||
+    req.path.startsWith('/api/upload') ||
+    req.path.startsWith('/api/reels') ||
+    req.path === '/api/health'
+  ) {
     return next();
   }
 
@@ -187,186 +197,86 @@ let withdrawalRequests: any[] = [
   },
 ];
 
-const CDN_SAMPLE_MAP: Record<string, string> = {
-  flower: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-  sample1: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
-  bunny: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
-  action: 'https://vjs.zencdn.net/v/oceans.mp4',
-  echo: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4',
-};
-
 function cleanServerVideoUrl(url: string | undefined | null): string {
-  if (!url) return CDN_SAMPLE_MAP.flower;
-  if (url.includes('flower.mp4')) return CDN_SAMPLE_MAP.flower;
-  if (url.includes('sample1.mp4')) return CDN_SAMPLE_MAP.sample1;
-  if (url.includes('bunny.mp4')) return CDN_SAMPLE_MAP.bunny;
-  if (url.includes('action.mp4')) return CDN_SAMPLE_MAP.action;
-  if (url.includes('echo')) return CDN_SAMPLE_MAP.echo;
-  if (url.includes('commondatastorage') || url.includes('ms-shorts-vip-') || url.includes('akai.in') || url.startsWith('/uploads/flower') || url.startsWith('/uploads/sample1') || url.startsWith('/uploads/bunny') || url.startsWith('/uploads/action')) {
-    return CDN_SAMPLE_MAP.flower;
-  }
+  if (!url) return '';
   return url;
 }
 
-const DEFAULT_INITIAL_REELS = [
-  {
-    id: 'reel-vip-music-1',
-    videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    poster: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80',
-    username: '@Mehndi_Babu',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    caption: 'Top Trending Bollywood Beats & VIP Acoustic Sound! 🎵🎶 Best audio sync for reels!',
-    category: 'music',
-    hashtags: ['#Music', '#Gane', '#TrendingSong', '#MehndiBabu', '#VIPMusic'],
-    songName: 'VIP Cyber Funk Beats - MS Audio Lab',
-    likes: 18450,
-    commentsCount: 1290,
-    sharesCount: 542,
-    isLiked: false,
-    isFollowing: true,
-    isUserUploaded: false,
-    storageProvider: 'akai.in',
-    archiveChannelUrl: 'https://archive.org/details/@mehndi_babu/uploads',
-    createdAt: '1h ago',
-  },
-  {
-    id: 'reel-vip-comedy-1',
-    videoUrl: 'https://media.w3.org/2010/05/bunny/trailer.mp4',
-    poster: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=600&auto=format&fit=crop&q=80',
-    username: '@Comedy_King_Rahul',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    caption: 'Desi Funny Prank gone wrong! 😂🤣 Laugh out loud comedy short with friends!',
-    category: 'comedy',
-    hashtags: ['#Comedy', '#Haso', '#FunnyShorts', '#Prank', '#Meme'],
-    songName: 'Funny Cartoon Laugh Track - DJ Comedy Beat',
-    likes: 24320,
-    commentsCount: 2412,
-    sharesCount: 1298,
-    isLiked: true,
-    isFollowing: false,
-    isUserUploaded: false,
-    storageProvider: 'archive.org',
-    archiveChannelUrl: 'https://archive.org/details/@mehndi_babu/uploads',
-    createdAt: '3h ago',
-  },
-  {
-    id: 'reel-vip-dance-1',
-    videoUrl: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/big_buck_bunny.mp4',
-    poster: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
-    username: '@Priya_DanceStar',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    caption: 'Energetic Hip-Hop & Bollywood Hook Step Choreography! 💃✨ Try this step now!',
-    category: 'dance',
-    hashtags: ['#Dance', '#HookStep', '#Choreography', '#DanceChallenge', '#VIP'],
-    songName: 'Hyper Energy Trap Synth - Mehndi Beats',
-    likes: 19200,
-    commentsCount: 1205,
-    sharesCount: 640,
-    isLiked: false,
-    isFollowing: false,
-    isUserUploaded: false,
-    storageProvider: 'akai.in',
-    archiveChannelUrl: 'https://archive.org/details/@mehndi_babu/uploads',
-    createdAt: '5h ago',
-  },
-  {
-    id: 'reel-vip-music-2',
-    videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
-    poster: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80',
-    username: '@Sufi_Vibes_Official',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    caption: 'Heart-touching Sufi Lo-Fi Acoustic Gana! 🎧 Acoustic strings & calming vocals.',
-    category: 'music',
-    hashtags: ['#Music', '#Lofi', '#Gane', '#SufiSong', '#RomanticBeats'],
-    songName: 'Neon Sunset Lofi Chill - DJ Sunset Waves',
-    likes: 31400,
-    commentsCount: 1878,
-    sharesCount: 1512,
-    isLiked: true,
-    isFollowing: true,
-    isUserUploaded: false,
-    storageProvider: 'akai.in',
-    archiveChannelUrl: 'https://archive.org/details/@mehndi_babu/uploads',
-    createdAt: '1d ago',
-  },
-  {
-    id: 'reel-vip-comedy-2',
-    videoUrl: 'https://cdn.jsdelivr.net/gh/mediaelement/mediaelement-files@master/echo-hereweare.mp4',
-    poster: 'https://images.unsplash.com/photo-1527224857830-43a7acc85260?w=600&auto=format&fit=crop&q=80',
-    username: '@Desi_Jokes_Hub',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-    caption: 'When mom catches you using phone at 3 AM! 😂 Very relatable comedy skit!',
-    category: 'comedy',
-    hashtags: ['#Comedy', '#Relatable', '#DesiMemes', '#FunnyVideo', '#Viral'],
-    songName: 'Desi Dholak Comedy Punch - DJ Fun',
-    likes: 27800,
-    commentsCount: 1540,
-    sharesCount: 2100,
-    isLiked: false,
-    isFollowing: false,
-    isUserUploaded: false,
-    storageProvider: 'direct',
-    createdAt: '2d ago',
-  },
-  {
-    id: 'reel-vip-shayari-1',
-    videoUrl: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    poster: 'https://images.unsplash.com/photo-1518895949257-7621c3c786d7?w=600&auto=format&fit=crop&q=80',
-    username: '@Shayari_DilSe',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    caption: 'Khubsurat Shayari for romantic hearts 💖 "Tere bina jeena mushkil hai..." #LoveShayari',
-    category: 'shayari',
-    hashtags: ['#Shayari', '#Romantic', '#LoveQuotes', '#DilSe', '#Poetry'],
-    songName: 'Acoustic Morning Breeze - Acoustic Dreams',
-    likes: 16500,
-    commentsCount: 840,
-    sharesCount: 1100,
-    isLiked: false,
-    isFollowing: true,
-    isUserUploaded: false,
-    storageProvider: 'akai.in',
-    createdAt: '2d ago',
-  },
-  {
-    id: 'reel-vip-action-1',
-    videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
-    poster: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&auto=format&fit=crop&q=80',
-    username: '@Action_Stunt_Pro',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    caption: 'Extreme Bullrun Supercar Drift & Speed Challenge! 🏎️💨 Action at 100 MPH!',
-    category: 'action',
-    hashtags: ['#Action', '#Supercar', '#Drift', '#Stunt', '#FastAndFurious'],
-    songName: 'Hyper Energy Trap Synth - Mehndi Beats',
-    likes: 21000,
-    commentsCount: 920,
-    sharesCount: 870,
-    isLiked: true,
-    isFollowing: false,
-    isUserUploaded: false,
-    storageProvider: 'akai.in',
-    createdAt: '3d ago',
-  },
-];
+const DEFAULT_INITIAL_REELS: any[] = [];
 
 try {
   if (fs.existsSync(REELS_FILE)) {
     const raw = fs.readFileSync(REELS_FILE, 'utf-8');
-    cloudReels = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      cloudReels = parsed.filter(
+        (r) =>
+          r &&
+          r.id &&
+          !r.id.startsWith('reel-vip-') &&
+          !r.id.startsWith('reel-archive-') &&
+          !r.videoUrl?.includes('oceans.mp4') &&
+          !r.videoUrl?.includes('trailer.mp4') &&
+          !r.videoUrl?.includes('big_buck_bunny.mp4') &&
+          !r.videoUrl?.includes('echo-hereweare.mp4') &&
+          !r.videoUrl?.includes('flower.mp4')
+      );
+    }
   }
 } catch (e) {
   console.warn('Error reading reels database file, starting clean:', e);
   cloudReels = [];
 }
 
-// Seed default initial reels if empty or clean any legacy broken links
 if (!cloudReels || cloudReels.length === 0) {
-  cloudReels = [...DEFAULT_INITIAL_REELS];
-} else {
-  cloudReels = cloudReels.map((r) => ({
-    ...r,
-    videoUrl: cleanServerVideoUrl(r.videoUrl),
-  }));
+  cloudReels = [];
 }
+
+// Auto-index uploaded user videos from /uploads directory into cloudReels if not already registered
+try {
+  if (fs.existsSync(UPLOADS_DIR)) {
+    const files = fs.readdirSync(UPLOADS_DIR);
+    for (const file of files) {
+      if (
+        (file.endsWith('.mp4') || file.endsWith('.webm') || file.endsWith('.mov')) &&
+        !file.includes('dummy') &&
+        !file.includes('sample') &&
+        !file.includes('bunny') &&
+        !file.includes('oceans') &&
+        !file.includes('flower')
+      ) {
+        const videoUrl = `/uploads/${file}`;
+        const id = `user-${file.replace(/\.[^/.]+$/, '')}`;
+        if (!cloudReels.some((r) => r.videoUrl === videoUrl || r.id === id)) {
+          cloudReels.push({
+            id,
+            videoUrl,
+            poster: '',
+            username: '@Mehndi_Babu',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            caption: 'My Uploaded Video 📱✨ #MehndiBabu #MSShortsVIP',
+            category: 'dance',
+            hashtags: ['#MehndiBabu', '#MSShortsVIP', '#Viral'],
+            songName: 'Original Sound - Mehndi Babu',
+            likes: 120,
+            commentsCount: 15,
+            sharesCount: 8,
+            isLiked: false,
+            isFollowing: true,
+            isUserUploaded: true,
+            isVip: true,
+            vipLevel: 1,
+            storageProvider: 'local_server',
+            createdAt: 'Recently uploaded',
+          });
+        }
+      }
+    }
+  }
+} catch (e) {
+  console.warn('Auto-index uploads notice:', e);
+}
+
 persistReels();
 
 try {
@@ -472,8 +382,32 @@ app.post('/api/reels/:id/like', (req, res) => {
   res.status(404).json({ error: 'Reel not found' });
 });
 
+async function uploadToGlobalCdn(buffer: Buffer, filename: string): Promise<string> {
+  try {
+    const blob = new Blob([buffer]);
+    const form = new FormData();
+    form.append('reqtype', 'fileupload');
+    form.append('time', '72h');
+    form.append('fileToUpload', blob, filename);
+    const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+      method: 'POST',
+      body: form,
+    });
+    if (res.ok) {
+      const text = (await res.text()).trim();
+      if (text.startsWith('http')) {
+        console.log('Successfully mirrored video to Global CDN:', text);
+        return text;
+      }
+    }
+  } catch (err) {
+    console.warn('Global CDN upload mirror notice:', err);
+  }
+  return '';
+}
+
 // 6. Direct Video Upload & Permanent Public MP4/WebM Generation with Auto-Thumbnail
-app.post('/api/upload', (req, res) => {
+app.post('/api/upload', async (req, res) => {
   try {
     const { videoBase64, thumbnailBase64, filename, mimeType, reel } = req.body;
 
@@ -534,8 +468,12 @@ app.post('/api/upload', (req, res) => {
       }
     }
 
-    // Build absolute public stream URL
-    const publicUrl = `/uploads/${cleanName}`;
+    // Mirror to global CDN for cross-browser / cross-device instant streaming
+    const globalCdnUrl = await uploadToGlobalCdn(buffer, cleanName);
+
+    // Build public stream URL (prefer global CDN URL, fallback to local /uploads/ route)
+    const localUrl = `/uploads/${cleanName}`;
+    const publicUrl = globalCdnUrl || localUrl;
 
     // Auto-register to cloudReels if reel metadata was provided
     if (reel) {
@@ -554,6 +492,7 @@ app.post('/api/upload', (req, res) => {
       success: true,
       filename: cleanName,
       publicUrl,
+      localUrl,
       posterUrl,
       sizeBytes: buffer.length,
       streamUrl: publicUrl,
@@ -564,8 +503,8 @@ app.post('/api/upload', (req, res) => {
   }
 });
 
-// Binary upload for fast large files and direct APK streaming uploads
-app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '200mb' }), (req, res) => {
+// Binary upload for fast large files and direct streaming uploads
+app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '200mb' }), async (req, res) => {
   try {
     const rawBuffer = req.body;
     if (!rawBuffer || rawBuffer.length === 0) {
@@ -587,11 +526,16 @@ app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octe
       fs.writeFileSync(path.join(publicUploadsDir, cleanName), rawBuffer);
     } catch (e) {}
 
-    const publicUrl = `/uploads/${cleanName}`;
+    // Mirror to global CDN
+    const globalCdnUrl = await uploadToGlobalCdn(rawBuffer, cleanName);
+    const localUrl = `/uploads/${cleanName}`;
+    const publicUrl = globalCdnUrl || localUrl;
+
     res.json({
       success: true,
       filename: cleanName,
       publicUrl,
+      localUrl,
       streamUrl: publicUrl,
       sizeBytes: rawBuffer.length,
     });
