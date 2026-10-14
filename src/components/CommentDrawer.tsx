@@ -1,23 +1,27 @@
 import React, { useState } from 'react';
-import { VideoReel, VideoComment } from '../types';
-import { X, Send, Heart, Gift, Sparkles } from 'lucide-react';
+import { VideoReel, VideoComment, AuthUser } from '../types';
+import { X, Send, Heart, Gift, Sparkles, LogIn } from 'lucide-react';
 
 interface CommentDrawerProps {
   reel: VideoReel | null;
   comments: VideoComment[];
+  authUser?: AuthUser | null;
   onClose: () => void;
   onAddComment: (text: string) => void;
   onLikeComment: (id: string) => void;
   onOpenGiftModal?: (reel: VideoReel) => void;
+  onRequireAuth?: (message: string) => void;
 }
 
 export const CommentDrawer: React.FC<CommentDrawerProps> = ({
   reel,
   comments,
+  authUser,
   onClose,
   onAddComment,
   onLikeComment,
   onOpenGiftModal,
+  onRequireAuth,
 }) => {
   const [inputText, setInputText] = useState('');
 
@@ -25,6 +29,12 @@ export const CommentDrawer: React.FC<CommentDrawerProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!authUser) {
+      if (onRequireAuth) {
+        onRequireAuth('कमेंट पोस्ट करने के लिए कृपया पहले लॉगिन करें।');
+      }
+      return;
+    }
     if (!inputText.trim()) return;
     onAddComment(inputText.trim());
     setInputText('');
@@ -124,28 +134,48 @@ export const CommentDrawer: React.FC<CommentDrawerProps> = ({
           {onOpenGiftModal && (
             <button
               type="button"
-              onClick={() => onOpenGiftModal(reel)}
-              className="p-2.5 rounded-full bg-gradient-to-tr from-amber-500 to-pink-500 text-white shadow-md hover:scale-105 active:scale-95 transition-all shrink-0"
+              onClick={() => {
+                if (!authUser && onRequireAuth) {
+                  onRequireAuth('क्रिएटर को गिफ्ट भेजने के लिए कृपया पहले लॉगिन करें।');
+                  return;
+                }
+                onOpenGiftModal(reel);
+              }}
+              className="p-2.5 rounded-full bg-gradient-to-tr from-amber-500 to-pink-500 text-white shadow-md hover:scale-105 active:scale-95 transition-all shrink-0 cursor-pointer"
               title="Send Gift to Creator"
             >
               <Gift className="w-4 h-4" />
             </button>
           )}
 
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Add a comment as @Mehndi_Babu..."
-            className="flex-1 px-4 py-2 rounded-full bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-pink-500"
-          />
+          <div
+            className="flex-1 relative flex items-center"
+            onClick={() => {
+              if (!authUser && onRequireAuth) {
+                onRequireAuth('कमेंट करने के लिए कृपया पहले लॉगिन करें।');
+              }
+            }}
+          >
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              disabled={!authUser}
+              placeholder={
+                authUser
+                  ? `Add a comment as @${authUser.username || authUser.displayName}...`
+                  : 'कमेंट करने के लिए लॉगिन करें / Login to comment...'
+              }
+              className="w-full px-4 py-2 rounded-full bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-pink-500 disabled:bg-slate-900/60 disabled:text-slate-400 disabled:cursor-pointer"
+            />
+          </div>
 
           <button
             type="submit"
-            disabled={!inputText.trim()}
-            className="p-2.5 rounded-full bg-pink-600 hover:bg-pink-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 shrink-0"
+            disabled={authUser ? !inputText.trim() : false}
+            className="p-2.5 rounded-full bg-pink-600 hover:bg-pink-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-95 shrink-0 cursor-pointer"
           >
-            <Send className="w-4 h-4" />
+            {authUser ? <Send className="w-4 h-4" /> : <LogIn className="w-4 h-4 text-white" />}
           </button>
         </form>
       </div>

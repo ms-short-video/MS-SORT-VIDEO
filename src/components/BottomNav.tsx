@@ -1,9 +1,10 @@
 import React from 'react';
-import { ActiveTab } from '../types';
-import { Home, Radio, Plus, User, MessageSquare } from 'lucide-react';
+import { ActiveTab, AuthUser } from '../types';
+import { Home, Radio, Plus, User, MessageSquare, LogIn } from 'lucide-react';
 
 interface BottomNavProps {
   activeTab: ActiveTab;
+  authUser?: AuthUser | null;
   onTabChange: (tab: ActiveTab) => void;
   onOpenUploadModal: () => void;
   unreadMessagesCount?: number;
@@ -11,6 +12,7 @@ interface BottomNavProps {
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeTab,
+  authUser,
   onTabChange,
   onOpenUploadModal,
   unreadMessagesCount = 0,
@@ -21,7 +23,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Home Tab */}
         <button
           onClick={() => onTabChange('home')}
-          className={`flex flex-col items-center gap-1 transition-all ${
+          className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${
             activeTab === 'home' ? 'text-pink-500 scale-105' : 'text-slate-400 hover:text-white'
           }`}
         >
@@ -32,7 +34,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Live Tab */}
         <button
           onClick={() => onTabChange('live')}
-          className={`flex flex-col items-center gap-1 transition-all relative ${
+          className={`flex flex-col items-center gap-1 transition-all cursor-pointer relative ${
             activeTab === 'live' ? 'text-red-500 scale-105' : 'text-slate-400 hover:text-white'
           }`}
         >
@@ -46,16 +48,16 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Center Gallery Video Upload Button */}
         <button
           onClick={onOpenUploadModal}
-          className="p-3 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-indigo-600 text-white shadow-lg shadow-pink-600/40 hover:scale-110 active:scale-95 transition-all -mt-5 border-2 border-black"
-          title="Upload Video from Gallery"
+          className="p-3 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-500 to-indigo-600 text-white shadow-lg shadow-pink-600/40 hover:scale-110 active:scale-95 transition-all -mt-5 border-2 border-black cursor-pointer group"
+          title={authUser ? 'Upload Video from Gallery' : 'Login to Upload Video'}
         >
-          <Plus className="w-6 h-6 stroke-[3]" />
+          <Plus className="w-6 h-6 stroke-[3] group-hover:rotate-90 transition-transform" />
         </button>
 
-        {/* Chat / Direct Messages Tab (Replaced notification tab) */}
+        {/* Chat / Direct Messages Tab */}
         <button
           onClick={() => onTabChange('chat')}
-          className={`flex flex-col items-center gap-1 transition-all relative ${
+          className={`flex flex-col items-center gap-1 transition-all cursor-pointer relative ${
             activeTab === 'chat' ? 'text-indigo-400 scale-105' : 'text-slate-400 hover:text-white'
           }`}
         >
@@ -73,12 +75,22 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         {/* Profile & Wallet Tab */}
         <button
           onClick={() => onTabChange('profile')}
-          className={`flex flex-col items-center gap-1 transition-all ${
+          className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${
             activeTab === 'profile' ? 'text-amber-400 scale-105' : 'text-slate-400 hover:text-white'
           }`}
         >
-          <User className="w-5 h-5" />
-          <span className="text-[10px] font-bold">Profile</span>
+          {authUser?.photoURL ? (
+            <img
+              src={authUser.photoURL}
+              alt={authUser.displayName || 'Profile'}
+              className="w-5 h-5 rounded-full object-cover border border-amber-400/60"
+            />
+          ) : authUser ? (
+            <User className="w-5 h-5" />
+          ) : (
+            <LogIn className="w-5 h-5" />
+          )}
+          <span className="text-[10px] font-bold">{authUser ? 'Profile' : 'Login'}</span>
         </button>
       </div>
     </div>

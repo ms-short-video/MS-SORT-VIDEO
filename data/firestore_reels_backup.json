@@ -1,0 +1,28 @@
+[
+  {
+    "id": "user-reel_1788424088669_test_upload",
+    "category": "dance",
+    "isFollowing": true,
+    "updatedAt": "2026-09-21T15:37:56.497Z",
+    "vipLevel": 1,
+    "isUserUploaded": true,
+    "caption": "My Uploaded Video 📱✨ #MehndiBabu #MSShortsVIP",
+    "hashtags": [
+      "#MehndiBabu",
+      "#MSShortsVIP",
+      "#Viral"
+    ],
+    "storageProvider": "cloud_storage",
+    "username": "@Mehndi_Babu",
+    "sharesCount": 8,
+    "isVip": true,
+    "songName": "Original Sound - Mehndi Babu",
+    "poster": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=600&auto=format&fit=crop&q=80",
+    "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    "likes": 120,
+    "isLiked": false,
+    "videoUrl": "/uploads/reel_1788424088669_test_upload.mp4",
+    "createdAt": "Recently uploaded",
+    "commentsCount": 15
+  }
+]

@@ -6,6 +6,7 @@ import { uploadToFreeCloudPipeline, fetchCloudReels, publishReelToCloud, deleteR
 import { getSavedTasteProfile, recordWatchInteraction, rankReelsForFeed } from './utils/recommendationEngine';
 import { saveVideoBlob } from './utils/localVideoStore';
 import { getCleanVideoUrl } from './utils/videoUtils';
+import { uploadToArchiveOrgS3 } from './utils/archiveS3Service';
 import { HeaderProgressBadge } from './components/HeaderProgressBadge';
 import { FeedCategoryBar } from './components/FeedCategoryBar';
 import { AlgorithmProfileModal } from './components/AlgorithmProfileModal';
@@ -20,7 +21,7 @@ import { VipUpgradeModal } from './components/VipUpgradeModal';
 import { LiveStreamView } from './components/LiveStreamView';
 import { ChatView } from './components/ChatView';
 import { ProfileWalletView } from './components/ProfileWalletView';
-import { GoogleAuthModal } from './components/GoogleAuthModal';
+import { AuthModal } from './components/AuthModal';
 import { EditProfileModal } from './components/EditProfileModal';
 import { GiftingModal } from './components/GiftingModal';
 import { CoinRechargeModal } from './components/CoinRechargeModal';
@@ -30,28 +31,44 @@ import { SecurityShieldModal } from './components/SecurityShieldModal';
 import { BottomNav } from './components/BottomNav';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { SplashScreen } from './components/SplashScreen';
-import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins, Cloud } from 'lucide-react';
+import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins, Cloud, Volume2, VolumeX } from 'lucide-react';
 
 export function isDummyReel(r: any): boolean {
   if (!r || !r.id) return true;
-  const id = String(r.id);
-  if (id.startsWith('reel-archive-') || id.startsWith('reel-vip-')) return true;
   const url = String(r.videoUrl || '').toLowerCase();
-  if (!url) return false;
+  const id = String(r.id).toLowerCase();
+
+  // Filter out expired dead litterbox URLs and all sample/dummy videos
   if (
-    url.includes('oceans.mp4') ||
-    url.includes('bunny') ||
+    url.includes('/sample-videos/') ||
+    id.startsWith('local-reel-') ||
+    id.startsWith('dummy-') ||
+    id.startsWith('sample-') ||
+    url.includes('action.mp4') ||
+    url.includes('bunny.mp4') ||
+    url.includes('sample1.mp4') ||
     url.includes('flower.mp4') ||
+    url.includes('litterbox') ||
+    url.includes('litter.catbox') ||
+    url.includes('oceans.mp4') ||
     url.includes('mediaelement') ||
     url.includes('echo-hereweare') ||
     url.includes('trailer.mp4') ||
-    url.includes('sample1.mp4') ||
-    url.includes('sample2.mp4') ||
     url.includes('commondatastorage') ||
     url.includes('assets.mixkit.co')
   ) {
     return true;
   }
+
+  // User uploaded videos and camera recordings are valid
+  if (
+    r.isUserUploaded === true ||
+    id.startsWith('user-') ||
+    id.startsWith('cam-')
+  ) {
+    return false;
+  }
+
   return false;
 }
 
@@ -69,22 +86,34 @@ export function deduplicateReels(items: VideoReel[]): VideoReel[] {
 }
 
 export function App() {
-  // Auth User State (Persisted in localStorage with Google Login default)
+  // Auth User State (Persisted in localStorage; null means unauthenticated guest who can only view content)
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     try {
-      const saved = localStorage.getItem('ms_shorts_vip_auth_user');
-      return saved ? JSON.parse(saved) : DEFAULT_GOOGLE_USER;
+      // Purge any leaked legacy admin auto-login session so visitors never get pre-logged in
+      localStorage.removeItem('ms_shorts_vip_auth_user');
+
+      const saved = localStorage.getItem('ms_shorts_active_session_v4');
+      if (saved) {
+        const parsed: AuthUser = JSON.parse(saved);
+        if (parsed && parsed.uid && parsed.isLoggedIn) {
+          return parsed;
+        }
+      }
+      return null;
     } catch {
-      return DEFAULT_GOOGLE_USER;
+      return null;
     }
   });
+
+  const [authPromptMessage, setAuthPromptMessage] = useState<string | null>(null);
 
   // Save auth user state to localStorage
   useEffect(() => {
     try {
-      if (authUser) {
-        localStorage.setItem('ms_shorts_vip_auth_user', JSON.stringify(authUser));
+      if (authUser && authUser.isLoggedIn) {
+        localStorage.setItem('ms_shorts_active_session_v4', JSON.stringify(authUser));
       } else {
+        localStorage.removeItem('ms_shorts_active_session_v4');
         localStorage.removeItem('ms_shorts_vip_auth_user');
       }
     } catch (e) {
@@ -92,15 +121,47 @@ export function App() {
     }
   }, [authUser]);
 
-  // Google Login Handler - Opens seamless Google Auth modal
-  const handleGoogleSignIn = () => {
+  // Open Auth modal for signin or registration
+  const handleOpenAuthModal = (mode: 'signin' | 'register' = 'signin', promptMsg?: string) => {
+    setAuthModalMode(mode);
+    setAuthPromptMessage(promptMsg || null);
     setIsGoogleAuthModalOpen(true);
   };
 
-  // Google Sign Out Handler
+  // Login Handler - Opens seamless Auth modal
+  const handleGoogleSignIn = () => {
+    handleOpenAuthModal('signin');
+  };
+
+  // Sign Out Handler
   const handleSignOut = async () => {
     await logoutUser();
     setAuthUser(null);
+  };
+
+  // Verified active user video
+  const DEFAULT_ACTIVE_REEL: VideoReel = {
+    id: 'user-reel-1791983500312-4swis',
+    videoUrl: 'https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4',
+    archiveDownloadUrl: 'https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4',
+    archiveChannelUrl: 'https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4',
+    poster: '/uploads/poster_reel_1791983508338.jpg',
+    username: '@sunil_mahto',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    caption: 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+    category: 'music',
+    hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
+    songName: 'Original Audio - @sunil_mahto',
+    likes: 1,
+    commentsCount: 0,
+    sharesCount: 0,
+    isLiked: true,
+    isFollowing: true,
+    isUserUploaded: true,
+    isVip: true,
+    vipLevel: 1,
+    storageProvider: 'archive.org',
+    createdAt: 'Just now',
   };
 
   // Load initial reels from localStorage or cloud (purging ALL dummy/sample reels)
@@ -113,16 +174,21 @@ export function App() {
           const cleanUserReels = parsed
             .filter((r) => !isDummyReel(r))
             .map((r) => {
-              return { ...r, videoUrl: getCleanVideoUrl(r.videoUrl) };
+              const archive = (r as any).archiveDownloadUrl || (r as any).archiveChannelUrl;
+              return {
+                ...r,
+                videoUrl: getCleanVideoUrl(archive || r.videoUrl),
+                archiveDownloadUrl: archive || (r as any).archiveDownloadUrl,
+              };
             });
           if (cleanUserReels.length > 0) {
             return deduplicateReels(cleanUserReels);
           }
         }
       }
-      return [];
+      return [DEFAULT_ACTIVE_REEL];
     } catch {
-      return [];
+      return [DEFAULT_ACTIVE_REEL];
     }
   });
 
@@ -160,9 +226,26 @@ export function App() {
 
   // Modals & Recorders State
   const [isGoogleAuthModalOpen, setIsGoogleAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'register'>('signin');
   const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState<boolean>(false);
-  // Automatic sound enabled by default as requested
-  const [isGloballyMuted, setIsGloballyMuted] = useState<boolean>(false);
+  // Automatic sound enabled by default: once unmuted, stays unmuted across ALL videos!
+  const [isGloballyMuted, setIsGloballyMuted] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('ms_shorts_global_muted');
+      // Defaults to false (unmuted sound ON)
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ms_shorts_global_muted', isGloballyMuted ? 'true' : 'false');
+    } catch {
+      // ignore
+    }
+  }, [isGloballyMuted]);
   const [selectedMusicTrackName, setSelectedMusicTrackName] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [isCameraRecorderOpen, setIsCameraRecorderOpen] = useState<boolean>(false);
@@ -304,10 +387,26 @@ export function App() {
       try {
         const cloudData = await fetchCloudReels();
         if (cloudData && Array.isArray(cloudData)) {
-          const cleanCloud = cloudData.filter((c) => !isDummyReel(c));
+          const cleanCloud = cloudData
+            .filter((c) => !isDummyReel(c))
+            .map((c) => {
+              const archive = (c as any).archiveDownloadUrl || (c as any).archiveChannelUrl;
+              return {
+                ...c,
+                videoUrl: getCleanVideoUrl(archive || c.videoUrl),
+                archiveDownloadUrl: archive || (c as any).archiveDownloadUrl,
+              };
+            });
           setReels((prev) => {
             const cleanPrev = prev.filter((p) => !isDummyReel(p));
-            return deduplicateReels([...cleanCloud, ...cleanPrev.filter((p) => !cleanCloud.some((c) => c.id === p.id))]);
+            const merged = deduplicateReels([...cleanCloud, ...cleanPrev.filter((p) => !cleanCloud.some((c) => c.id === p.id))]);
+            if (
+              merged.length !== cleanPrev.length ||
+              JSON.stringify(merged.map((r) => r.id)) !== JSON.stringify(cleanPrev.map((r) => r.id))
+            ) {
+              return merged;
+            }
+            return prev;
           });
         }
       } catch (err) {
@@ -315,11 +414,21 @@ export function App() {
       }
     };
 
+    // Clean up any stale localStorage entries containing dead litterbox URLs from previous sessions
+    try {
+      const saved = localStorage.getItem('ms_shorts_vip_reels');
+      if (saved && (saved.includes('litterbox') || saved.includes('catbox.moe'))) {
+        localStorage.removeItem('ms_shorts_vip_reels');
+      }
+    } catch {
+      // ignore
+    }
+
     // Initial sync
     syncCloudReels();
 
-    // Polling interval (every 4s) to ensure incognito & other devices immediately receive new uploaded reels
-    const pollTimer = setInterval(syncCloudReels, 4000);
+    // Polling interval (every 8s) to ensure incognito & other devices immediately receive new uploaded reels
+    const pollTimer = setInterval(syncCloudReels, 8000);
 
     return () => clearInterval(pollTimer);
   }, []);
@@ -339,10 +448,44 @@ export function App() {
     }
   }, [reels]);
 
-  // Automatically unmute audio on user's first interaction anywhere in the app
+  // Automatically unmute audio and unlock AudioContext on user's first interaction anywhere in the app
   useEffect(() => {
     const handleFirstGesture = () => {
       setIsGloballyMuted(false);
+      try {
+        localStorage.setItem('ms_shorts_global_muted', 'false');
+      } catch {}
+
+      // Unlock browser Web Audio context
+      try {
+        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          if (ctx.state === 'suspended') {
+            ctx.resume();
+          }
+        }
+      } catch {}
+
+      // Find active video and ensure sound is on ONLY for active reel, mute all others!
+      try {
+        const activeContainer = document.querySelector('[data-reel-active="true"]');
+        const activeVideo = activeContainer?.querySelector('video') || document.querySelector('video[data-reel-active="true"]');
+        if (activeVideo && !isGloballyMuted) {
+          activeVideo.muted = false;
+          activeVideo.volume = 1.0;
+        }
+        // Ensure all background videos stay strictly muted
+        const allVideos = document.querySelectorAll('video');
+        allVideos.forEach((v) => {
+          if (v !== activeVideo) {
+            v.muted = true;
+            v.volume = 0;
+            v.pause();
+          }
+        });
+      } catch {}
+
       window.removeEventListener('click', handleFirstGesture);
       window.removeEventListener('touchend', handleFirstGesture);
       window.removeEventListener('keydown', handleFirstGesture);
@@ -355,7 +498,7 @@ export function App() {
       window.removeEventListener('touchend', handleFirstGesture);
       window.removeEventListener('keydown', handleFirstGesture);
     };
-  }, []);
+  }, [isGloballyMuted]);
 
   // Subscribe to real-time Firestore database for global cloud sync
   useEffect(() => {
@@ -365,7 +508,14 @@ export function App() {
         if (remoteReels && remoteReels.length > 0) {
           const cleanRemote = remoteReels
             .filter((r) => !isDummyReel(r))
-            .map((r) => ({ ...r, videoUrl: getCleanVideoUrl(r.videoUrl) }));
+            .map((r) => {
+              const archive = (r as any).archiveDownloadUrl || (r as any).archiveChannelUrl;
+              return {
+                ...r,
+                videoUrl: getCleanVideoUrl(archive || r.videoUrl),
+                archiveDownloadUrl: archive || (r as any).archiveDownloadUrl,
+              };
+            });
           if (cleanRemote.length > 0) {
             setReels((prev) => {
               const cleanPrev = prev.filter((p) => !isDummyReel(p));
@@ -518,11 +668,47 @@ export function App() {
   const handleScroll = () => {
     if (!containerRef.current || activeTab !== 'home') return;
     const { scrollTop, clientHeight } = containerRef.current;
+    if (clientHeight <= 0) return;
     const newIdx = Math.round(scrollTop / clientHeight);
     if (newIdx !== activeReelIdx && newIdx >= 0 && newIdx < displayReels.length) {
       setActiveReelIdx(newIdx);
     }
   };
+
+  // Real-time Viewport IntersectionObserver:
+  // Immediately detects when a video enters center view (> 55%),
+  // starting its audio track and instantly silencing any leaving video!
+  useEffect(() => {
+    if (activeTab !== 'home' || !containerRef.current) return;
+    const container = containerRef.current;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+            const idxStr = entry.target.getAttribute('data-reel-idx');
+            if (idxStr !== null) {
+              const idx = parseInt(idxStr, 10);
+              if (!isNaN(idx) && idx >= 0 && idx < displayReels.length) {
+                setActiveReelIdx(idx);
+              }
+            }
+          }
+        }
+      },
+      {
+        root: container,
+        threshold: [0.5, 0.75],
+      }
+    );
+
+    const cards = container.querySelectorAll('[data-reel-card]');
+    cards.forEach((card) => observer.observe(card));
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activeTab, displayReels.length]);
 
   // Keyboard Arrow navigation for multi-video vertical feed
   useEffect(() => {
@@ -561,6 +747,11 @@ export function App() {
 
   // Toggle Like on Reel & trigger Like Notification + boost category score
   const handleLikeToggle = (reelId: string) => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'वीडियो को लाइक करने के लिए कृपया पहले लॉगिन करें।');
+      return;
+    }
+
     const targetReel = reels.find((r) => r.id === reelId);
     if (targetReel && !targetReel.isLiked) {
       const { updatedProfile } = recordWatchInteraction(targetReel, 5, { isLiked: true });
@@ -575,8 +766,8 @@ export function App() {
           if (isLikedNow) {
             addNotification(
               'like',
-              '@Mehndi_Babu',
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+              authUser.username,
+              authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
               `❤️ You liked video by ${r.username}`,
               r.id
             );
@@ -594,6 +785,10 @@ export function App() {
 
   // Handle Follow Toggle Notification
   const handleFollowToggle = (username: string) => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'क्रिएटर को फॉलो करने के लिए कृपया पहले लॉगिन करें।');
+      return;
+    }
     addNotification(
       'follow',
       username,
@@ -630,6 +825,11 @@ export function App() {
     songName?: string,
     category?: ReelCategory
   ) => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'वीडियो अपलोड करने के लिए कृपया पहले लॉगिन करें या नया अकाउंट बनाएं।');
+      return;
+    }
+
     const timestamp = Date.now();
     const newReelId = `user-reel-${timestamp}-${Math.random().toString(36).substring(2, 7)}`;
     
@@ -640,9 +840,9 @@ export function App() {
       containerRef.current.scrollTop = 0;
     }
 
-    const currentUsername = authUser?.username || '@Mehndi_Babu';
-    const currentAvatar = authUser?.photoURL || DEFAULT_GOOGLE_USER.photoURL;
-    const currentUid = authUser?.uid || 'google-user-default';
+    const currentUsername = authUser.username;
+    const currentAvatar = authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+    const currentUid = authUser.uid;
 
     const optimisticReel: VideoReel = {
       id: newReelId,
@@ -675,40 +875,69 @@ export function App() {
       // Instantly cache video in device's IndexedDB for guaranteed zero-failure local playback
       saveVideoBlob(newReelId, file).catch(() => {});
 
-      uploadToFreeCloudPipeline(
-        file,
-        { caption, username: currentUsername, songName: optimisticReel.songName },
-        (pct) => setUploadProgress({ isUploading: true, percentage: pct })
-      ).then((uploadResult) => {
-        let finalUrl = uploadResult.playbackUrl || uploadResult.videoUrl || '';
-        if (!finalUrl || finalUrl.startsWith('blob:')) {
-          finalUrl = uploadResult.videoUrl || videoUrl;
-        }
-        const updatedReel: VideoReel = {
-          ...optimisticReel,
-          videoUrl: finalUrl,
-          poster: uploadResult.posterUrl || optimisticReel.poster,
-        };
-        setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
-        publishReelToCloud(updatedReel);
-        if (finalUrl && !finalUrl.startsWith('blob:')) {
-          saveReelToFirestore(updatedReel);
-        }
-        setUploadProgress({ isUploading: true, percentage: 100 });
-        setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
+      // Optimize (720p / 2.2 Mbps) and upload to Internet Archive S3 with real-time XMLHttpRequest progress
+      uploadToArchiveOrgS3(file, {
+        title: caption || 'MS Shorts VIP Reel',
+        caption,
+        username: currentUsername,
+        onProgress: (prog) => {
+          setUploadProgress({
+            isUploading: true,
+            percentage: prog.percentage,
+          });
+        },
+      })
+        .then((uploadResult) => {
+          const directArchiveUrl = uploadResult.archiveDownloadUrl;
+          const localUrl = uploadResult.localStreamUrl;
 
-        addNotification(
-          'archive_sync',
-          currentUsername,
-          currentAvatar,
-          '⚡ Video uploaded & published publicly to all MS Shorts users!',
-          newReelId
-        );
-      }).catch((err) => {
-        console.warn('Background upload notice:', err);
-        publishReelToCloud(optimisticReel);
-        setUploadProgress({ isUploading: false, percentage: 0 });
-      });
+          const updatedReel: VideoReel = {
+            ...optimisticReel,
+            videoUrl: localUrl || directArchiveUrl || videoUrl,
+            archiveChannelUrl: directArchiveUrl,
+            storageProvider: 'archive.org',
+            poster: optimisticReel.poster,
+          };
+
+          setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
+          publishReelToCloud(updatedReel);
+          saveReelToFirestore(updatedReel);
+          setUploadProgress({ isUploading: true, percentage: 100 });
+          setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
+
+          addNotification(
+            'archive_sync',
+            currentUsername,
+            currentAvatar,
+            '⚡ Video optimized & saved permanently to Internet Archive S3!',
+            newReelId
+          );
+        })
+        .catch((err) => {
+          console.warn('Archive upload fallback to local cloud pipeline:', err);
+          uploadToFreeCloudPipeline(
+            file,
+            { caption, username: currentUsername, songName: optimisticReel.songName },
+            (pct) => setUploadProgress({ isUploading: true, percentage: pct })
+          )
+            .then((res) => {
+              const updatedReel: VideoReel = {
+                ...optimisticReel,
+                videoUrl: res.playbackUrl || res.videoUrl || videoUrl,
+                archiveChannelUrl: res.archiveDownloadUrl || '',
+                storageProvider: 'archive.org',
+              };
+              setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
+              publishReelToCloud(updatedReel);
+              saveReelToFirestore(updatedReel);
+              setUploadProgress({ isUploading: true, percentage: 100 });
+              setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
+            })
+            .catch(() => {
+              publishReelToCloud(optimisticReel);
+              setUploadProgress({ isUploading: false, percentage: 0 });
+            });
+        });
     } else {
       publishReelToCloud(optimisticReel);
       saveReelToFirestore(optimisticReel);
@@ -719,12 +948,16 @@ export function App() {
 
   // User clicked "Use Sound" / Spinning record on a video
   const handleUseMusic = (songName: string, soundArtist?: string) => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'इस ऑडियो पर वीडियो रिकॉर्ड करने के लिए कृपया पहले लॉगिन करें।');
+      return;
+    }
     setSelectedMusicTrackName(songName);
     setIsCameraRecorderOpen(true);
     addNotification(
       'archive_sync',
       soundArtist || 'Sound Engine',
-      authUser?.photoURL || DEFAULT_GOOGLE_USER.photoURL,
+      authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       `🎵 Sound "${songName}" selected! Record your short video now.`
     );
   };
@@ -738,6 +971,11 @@ export function App() {
     blob?: Blob | null,
     instantThumbnail?: string
   ) => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'वीडियो अपलोड करने के लिए कृपया पहले लॉगिन करें या नया अकाउंट बनाएं।');
+      return;
+    }
+
     const timestamp = Date.now();
     const newReelId = `cam-reel-${timestamp}-${Math.random().toString(36).substring(2, 7)}`;
     
@@ -748,9 +986,9 @@ export function App() {
       containerRef.current.scrollTop = 0;
     }
 
-    const currentUsername = authUser?.username || '@Mehndi_Babu';
-    const currentAvatar = authUser?.photoURL || DEFAULT_GOOGLE_USER.photoURL;
-    const currentUid = authUser?.uid || 'google-user-default';
+    const currentUsername = authUser.username;
+    const currentAvatar = authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+    const currentUid = authUser.uid;
 
     const optimisticReel: VideoReel = {
       id: newReelId,
@@ -771,7 +1009,7 @@ export function App() {
       isUserUploaded: true,
       isVip: authUser?.isVip || false,
       vipLevel: authUser?.vipLevel || 0,
-      storageProvider: 'akai.in',
+      storageProvider: 'archive.org',
       createdAt: 'Just now',
     };
 
@@ -780,40 +1018,39 @@ export function App() {
     setUploadProgress({ isUploading: true, percentage: 15 });
 
     if (blob) {
-      uploadToFreeCloudPipeline(
-        blob,
-        { caption, username: currentUsername, songName, filterApplied: filterName },
-        (pct) => setUploadProgress({ isUploading: true, percentage: pct })
-      ).then((uploadResult) => {
-        let finalUrl = uploadResult.playbackUrl || uploadResult.videoUrl || '';
-        if (!finalUrl || finalUrl.startsWith('blob:')) {
-          finalUrl = uploadResult.videoUrl || videoUrl;
-        }
-        const updatedReel: VideoReel = {
-          ...optimisticReel,
-          videoUrl: finalUrl,
-          poster: uploadResult.posterUrl || optimisticReel.poster,
-        };
-        setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
-        publishReelToCloud(updatedReel);
-        if (finalUrl && !finalUrl.startsWith('blob:')) {
-          saveReelToFirestore(updatedReel);
-        }
-        setUploadProgress({ isUploading: true, percentage: 100 });
-        setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
+      uploadToArchiveOrgS3(blob, {
+        title: caption || 'MS Shorts VIP Camera Reel',
+        caption,
+        username: currentUsername,
+        onProgress: (prog) => {
+          setUploadProgress({
+            isUploading: true,
+            percentage: prog.percentage,
+          });
+        },
+      })
+        .then((uploadResult) => {
+          const directArchiveUrl = uploadResult.archiveDownloadUrl;
+          const localUrl = uploadResult.localStreamUrl;
 
-        addNotification(
-          'archive_sync',
-          currentUsername,
-          currentAvatar,
-          '⚡ Camera video recorded & published publicly!',
-          newReelId
-        );
-      }).catch((err) => {
-        console.warn('Background upload notice:', err);
-        publishReelToCloud(optimisticReel);
-        setUploadProgress({ isUploading: false, percentage: 0 });
-      });
+          const updatedReel: VideoReel = {
+            ...optimisticReel,
+            videoUrl: localUrl || directArchiveUrl || videoUrl,
+            poster: optimisticReel.poster,
+            archiveChannelUrl: directArchiveUrl,
+            storageProvider: 'archive.org',
+          };
+          setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
+          publishReelToCloud(updatedReel);
+          saveReelToFirestore(updatedReel);
+          setUploadProgress({ isUploading: true, percentage: 100 });
+          setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
+        })
+        .catch(() => {
+          publishReelToCloud(optimisticReel);
+          saveReelToFirestore(optimisticReel);
+          setUploadProgress({ isUploading: false, percentage: 0 });
+        });
     } else {
       publishReelToCloud(optimisticReel);
       saveReelToFirestore(optimisticReel);
@@ -853,8 +1090,12 @@ export function App() {
   // Add Comment & Trigger Comment Notification
   const handleAddComment = (text: string) => {
     if (!commentsModalReel) return;
-    const currentUsername = authUser?.username?.replace('@', '') || 'Mehndi_Babu';
-    const currentAvatar = authUser?.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'कमेंट करने के लिए कृपया पहले लॉगिन करें।');
+      return;
+    }
+    const currentUsername = authUser.username?.replace('@', '') || authUser.displayName;
+    const currentAvatar = authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
     
     const newComment: VideoComment = {
       id: `comment-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
@@ -864,8 +1105,8 @@ export function App() {
       timeAgo: 'Just now',
       likes: 0,
       isLiked: false,
-      isVip: authUser?.isVip || false,
-      vipLevel: authUser?.vipLevel || 0,
+      isVip: authUser.isVip || false,
+      vipLevel: authUser.vipLevel || 0,
     };
 
     setComments((prev) => [newComment, ...prev]);
@@ -906,6 +1147,10 @@ export function App() {
 
   // Deduct coins for Virtual Gift (Live Stream / Quick gift)
   const handleDeductCoins = (amount: number, giftName: string): boolean => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'लाइव गिफ्ट भेजने के लिए कृपया पहले लॉगिन करें।');
+      return false;
+    }
     if (walletBalance < amount) {
       return false;
     }
@@ -928,7 +1173,7 @@ export function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        senderUsername: authUser?.username || '@Mehndi_Babu',
+        senderUsername: authUser.username,
         creatorUsername: 'Host Streamer',
         giftName,
         totalCostCoins: amount,
@@ -947,6 +1192,10 @@ export function App() {
 
   // Comprehensive Video & Live Gifting Handler (With 20% Commission & 80% Creator Diamonds)
   const handleSendGiftOnVideo = (gift: VirtualGift, count: number, reel?: VideoReel | null): boolean => {
+    if (!authUser) {
+      handleOpenAuthModal('signin', 'क्रिएटर को गिफ्ट भेजने के लिए कृपया पहले लॉगिन करें।');
+      return false;
+    }
     const totalCost = gift.cost * count;
     if (walletBalance < totalCost) {
       setIsCoinRechargeModalOpen(true);
@@ -1238,7 +1487,7 @@ export function App() {
         {activeTab === 'home' && (
           <button
             onClick={() => setIsNotificationModalOpen(true)}
-            className="absolute top-4 right-16 z-30 p-2.5 rounded-full bg-black/50 border border-white/20 text-white backdrop-blur-md hover:bg-black/80 transition-all active:scale-95 shadow-xl flex items-center justify-center"
+            className="absolute top-4 right-16 z-30 p-2.5 rounded-full bg-black/50 border border-white/20 text-white backdrop-blur-md hover:bg-black/80 transition-all active:scale-95 shadow-xl flex items-center justify-center cursor-pointer"
             title="Notification Center"
           >
             <Bell className="w-5 h-5 text-indigo-300" />
@@ -1250,18 +1499,22 @@ export function App() {
           </button>
         )}
 
-        {/* Floating Top Cloud Storage Status Button on Home Feed */}
+        {/* Floating Top Sound Control Button on Home Feed */}
         {activeTab === 'home' && (
           <button
-            onClick={() => setIsStorageModalOpen(true)}
-            className="absolute top-4 right-4 z-30 p-2.5 rounded-full bg-black/50 border border-emerald-500/40 text-white backdrop-blur-md hover:bg-black/80 transition-all active:scale-95 shadow-xl flex items-center justify-center group"
-            title="100% Free Unlimited Video Storage Hub"
+            onClick={() => setIsGloballyMuted((prev) => !prev)}
+            className={`absolute top-4 right-4 z-30 p-2.5 rounded-full border backdrop-blur-md transition-all active:scale-95 shadow-xl flex items-center justify-center cursor-pointer ${
+              isGloballyMuted
+                ? 'bg-rose-600/85 border-rose-400 text-white animate-pulse'
+                : 'bg-black/50 border-emerald-500/50 text-emerald-400 hover:bg-black/80'
+            }`}
+            title={isGloballyMuted ? 'Sound is Muted - Click to Enable Auto-Sound' : 'Sound is ON - Click to Mute'}
           >
-            <Cloud className="w-5 h-5 text-emerald-400 group-hover:scale-110 transition-transform" />
-            <span className="absolute -bottom-0.5 -right-0.5 flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-black"></span>
-            </span>
+            {isGloballyMuted ? (
+              <VolumeX className="w-5 h-5 text-rose-200" />
+            ) : (
+              <Volume2 className="w-5 h-5 text-emerald-400" />
+            )}
           </button>
         )}
 
@@ -1317,26 +1570,34 @@ export function App() {
                   )}
                 </div>
               ) : (
-                displayReels.map((reel, idx) => (
-                  <ReelCard
-                    key={`${reel.id}-${idx}`}
-                    reel={reel}
-                    isActive={idx === activeReelIdx && activeTab === 'home'}
-                    isGloballyMuted={isGloballyMuted}
-                    onToggleGlobalMute={() => setIsGloballyMuted((prev) => !prev)}
-                    onLikeToggle={handleLikeToggle}
-                    onOpenComments={(r) => setCommentsModalReel(r)}
-                    onShare={handleShareReel}
-                    onUseMusic={handleUseMusic}
-                    onVipClick={() => setIsVipModalOpen(true)}
-                    onSendGiftClick={(r) => {
-                      setSelectedGiftingReel(r || reel);
-                      setIsGiftingModalOpen(true);
-                    }}
-                    onFollowToggle={handleFollowToggle}
-                    onWatchTimeUpdate={handleWatchTimeUpdate}
-                  />
-                ))
+                displayReels.map((reel, idx) => {
+                  const dist = idx - activeReelIdx;
+                  // Aggressively preload current video, next 2 upcoming videos, and previous video
+                  const isPreloadTarget = dist >= -1 && dist <= 2;
+                  return (
+                    <ReelCard
+                      key={`${reel.id}-${idx}`}
+                      reel={reel}
+                      index={idx}
+                      isActive={idx === activeReelIdx && activeTab === 'home'}
+                      preloadDistance={dist}
+                      preloadMode={isPreloadTarget ? 'auto' : 'none'}
+                      isGloballyMuted={isGloballyMuted}
+                      onToggleGlobalMute={() => setIsGloballyMuted((prev) => !prev)}
+                      onLikeToggle={handleLikeToggle}
+                      onOpenComments={(r) => setCommentsModalReel(r)}
+                      onShare={handleShareReel}
+                      onUseMusic={handleUseMusic}
+                      onVipClick={() => setIsVipModalOpen(true)}
+                      onSendGiftClick={(r) => {
+                        setSelectedGiftingReel(r || reel);
+                        setIsGiftingModalOpen(true);
+                      }}
+                      onFollowToggle={handleFollowToggle}
+                      onWatchTimeUpdate={handleWatchTimeUpdate}
+                    />
+                  );
+                })
               )}
             </div>
           )}
@@ -1357,6 +1618,7 @@ export function App() {
               reels={reels}
               notifications={notifications}
               onOpenNotifications={() => setIsNotificationModalOpen(true)}
+              onOpenAuthModal={handleOpenAuthModal}
               onWatchReel={(r) => {
                 const targetIdx = reels.findIndex((x) => x.id === r.id);
                 if (targetIdx !== -1) {
@@ -1374,12 +1636,20 @@ export function App() {
               walletBalance={walletBalance}
               creatorDiamonds={creatorDiamonds}
               followersCount={followersCount}
-              userReels={reels.filter(
-                (r) =>
-                  (authUser && r.uploaderId && r.uploaderId === authUser.uid) ||
-                  (authUser && r.username?.toLowerCase() === authUser.username?.toLowerCase()) ||
-                  r.isUserUploaded
-              )}
+              userReels={reels.filter((r) => {
+                if (!authUser) return false;
+                if (isDummyReel(r)) return false;
+                const isMehndi =
+                  (authUser.email && authUser.email.toLowerCase().includes('mehndi')) ||
+                  (authUser.username && authUser.username.toLowerCase().includes('mehndi'));
+                if (isMehndi && (r.isUserUploaded || String(r.id).startsWith('user-') || String(r.id).startsWith('cam-') || (r.username && r.username.toLowerCase().includes('mehndi')))) {
+                  return true;
+                }
+                if (r.uploaderId && r.uploaderId === authUser.uid) return true;
+                if (r.uploaderEmail && authUser.email && r.uploaderEmail.toLowerCase() === authUser.email.toLowerCase()) return true;
+                if (r.username && authUser.username && r.username.toLowerCase() === authUser.username.toLowerCase()) return true;
+                return false;
+              })}
               likedReels={reels.filter((r) => r.isLiked)}
               transactions={transactions}
               onRecharge={handleRechargeWallet}
@@ -1393,14 +1663,47 @@ export function App() {
               onDeleteReel={handleDeleteReel}
               onUnlikeReel={(reelId) => handleLikeToggle(reelId)}
               onOpenVipModal={() => setIsVipModalOpen(true)}
-              onOpenUploadModal={() => setIsUploadModalOpen(true)}
-              onOpenEditProfile={() => setIsEditProfileModalOpen(true)}
-              onOpenWithdrawalModal={() => setIsWithdrawalModalOpen(true)}
-              onOpenRechargeModal={() => setIsCoinRechargeModalOpen(true)}
+              onOpenUploadModal={() => {
+                if (!authUser) {
+                  handleOpenAuthModal('signin', 'वीडियो अपलोड करने के लिए कृपया पहले लॉगिन करें या नया अकाउंट बनाएं।');
+                  return;
+                }
+                setIsUploadModalOpen(true);
+              }}
+              onOpenEditProfile={() => {
+                if (!authUser) {
+                  handleOpenAuthModal('signin', 'प्रोफाइल एडिट करने के लिए कृपया पहले लॉगिन करें।');
+                  return;
+                }
+                setIsEditProfileModalOpen(true);
+              }}
+              onOpenWithdrawalModal={() => {
+                if (!authUser) {
+                  handleOpenAuthModal('signin', 'पैसे निकालने के लिए कृपया पहले लॉगिन करें।');
+                  return;
+                }
+                setIsWithdrawalModalOpen(true);
+              }}
+              onOpenRechargeModal={() => {
+                if (!authUser) {
+                  handleOpenAuthModal('signin', 'कॉइन रिचार्ज करने के लिए कृपया पहले लॉगिन करें।');
+                  return;
+                }
+                setIsCoinRechargeModalOpen(true);
+              }}
               onOpenStorageModal={() => setIsStorageModalOpen(true)}
               onOpenSecurityModal={() => setIsSecurityModalOpen(true)}
+              onOpenAdminDashboard={() => {
+                if (!authUser) {
+                  handleOpenAuthModal('signin', 'एडमिन पैनल के लिए कृपया एडमिन अकाउंट से लॉगिन करें।');
+                  return;
+                }
+                setIsAdminDashboardOpen(true);
+              }}
               onGoogleSignIn={handleGoogleSignIn}
+              onOpenAuthModal={handleOpenAuthModal}
               onSignOut={handleSignOut}
+              onAuthSuccess={(user) => setAuthUser(user)}
             />
           )}
         </div>
@@ -1439,11 +1742,16 @@ export function App() {
           }}
         />
 
-        {/* Google Sign-In & Account Switcher Modal */}
-        <GoogleAuthModal
+        {/* User Registration & Sign-In Auth Modal */}
+        <AuthModal
           isOpen={isGoogleAuthModalOpen}
-          onClose={() => setIsGoogleAuthModalOpen(false)}
+          onClose={() => {
+            setIsGoogleAuthModalOpen(false);
+            setAuthPromptMessage(null);
+          }}
           currentUser={authUser}
+          initialMode={authModalMode}
+          promptMessage={authPromptMessage}
           onAuthSuccess={(user) => {
             setAuthUser(user);
             setFollowersCount(user.followersCount);
@@ -1451,7 +1759,7 @@ export function App() {
               'follow',
               user.displayName,
               user.photoURL,
-              `🔑 Successfully signed in as ${user.displayName} (${user.email})`
+              `🔑 Successfully logged in as ${user.displayName} (${user.username})`
             );
           }}
         />
@@ -1675,6 +1983,7 @@ export function App() {
         <AdminDashboardModal
           isOpen={isAdminDashboardOpen}
           onClose={() => setIsAdminDashboardOpen(false)}
+          authUser={authUser}
           reels={reels}
           onDeleteReel={handleDeleteReel}
           musicTracks={musicTracks}
@@ -1689,7 +1998,8 @@ export function App() {
         {/* Bottom Navigation Bar */}
         <BottomNav
           activeTab={activeTab === 'admin' ? 'profile' : activeTab}
-          unreadMessagesCount={3}
+          authUser={authUser}
+          unreadMessagesCount={authUser ? 3 : 0}
           onTabChange={(tab) => {
             if (tab === 'home') {
               handleHomeRefresh();
@@ -1700,7 +2010,13 @@ export function App() {
             }
             setCommentsModalReel(null);
           }}
-          onOpenUploadModal={() => setIsUploadModalOpen(true)}
+          onOpenUploadModal={() => {
+            if (!authUser) {
+              handleOpenAuthModal('signin', 'वीडियो अपलोड करने के लिए कृपया पहले लॉगिन करें या नया अकाउंट बनाएं।');
+              return;
+            }
+            setIsUploadModalOpen(true);
+          }}
         />
       </div>
     </div>

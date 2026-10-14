@@ -105,15 +105,33 @@ const streamFile = (filePath: string, req: express.Request, res: express.Respons
   else if (filePath.endsWith('.webp')) contentType = 'image/webp';
 
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+  if (req.method === 'HEAD') {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    });
+    return res.end();
+  }
 
   if (range && contentType.startsWith('video/')) {
     const parts = range.replace(/bytes=/, '').split('-');
     const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    // If end is not specified, chunk up to 2MB or fileSize to allow instant initial frame playback
+    const maxChunk = 2 * 1024 * 1024; // 2MB chunk
+    const end = parts[1] ? parseInt(parts[1], 10) : Math.min(fileSize - 1, start + maxChunk - 1);
     const chunksize = end - start + 1;
     const file = fs.createReadStream(filePath, { start, end });
+    req.on('close', () => {
+      file.destroy();
+    });
     res.writeHead(206, {
       'Content-Range': `bytes ${start}-${end}/${fileSize}`,
       'Accept-Ranges': 'bytes',
@@ -126,7 +144,11 @@ const streamFile = (filePath: string, req: express.Request, res: express.Respons
       'Content-Length': fileSize,
       'Content-Type': contentType,
     });
-    fs.createReadStream(filePath).pipe(res);
+    const file = fs.createReadStream(filePath);
+    req.on('close', () => {
+      file.destroy();
+    });
+    file.pipe(res);
   }
 };
 
@@ -134,7 +156,15 @@ app.get('/uploads/:filename', (req, res) => {
   streamFile(path.join(UPLOADS_DIR, req.params.filename), req, res);
 });
 
+app.head('/uploads/:filename', (req, res) => {
+  streamFile(path.join(UPLOADS_DIR, req.params.filename), req, res);
+});
+
 app.get('/sample-videos/:filename', (req, res) => {
+  streamFile(path.join(process.cwd(), 'public', 'sample-videos', req.params.filename), req, res);
+});
+
+app.head('/sample-videos/:filename', (req, res) => {
   streamFile(path.join(process.cwd(), 'public', 'sample-videos', req.params.filename), req, res);
 });
 
@@ -144,6 +174,7 @@ app.use('/uploads', express.static(UPLOADS_DIR, {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   }
 }));
 
@@ -209,18 +240,7 @@ try {
     const raw = fs.readFileSync(REELS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      cloudReels = parsed.filter(
-        (r) =>
-          r &&
-          r.id &&
-          !r.id.startsWith('reel-vip-') &&
-          !r.id.startsWith('reel-archive-') &&
-          !r.videoUrl?.includes('oceans.mp4') &&
-          !r.videoUrl?.includes('trailer.mp4') &&
-          !r.videoUrl?.includes('big_buck_bunny.mp4') &&
-          !r.videoUrl?.includes('echo-hereweare.mp4') &&
-          !r.videoUrl?.includes('flower.mp4')
-      );
+      cloudReels = parsed.filter((r) => r && r.id && r.videoUrl && !r.videoUrl.includes('litterbox'));
     }
   }
 } catch (e) {
@@ -232,50 +252,7 @@ if (!cloudReels || cloudReels.length === 0) {
   cloudReels = [];
 }
 
-// Auto-index uploaded user videos from /uploads directory into cloudReels if not already registered
-try {
-  if (fs.existsSync(UPLOADS_DIR)) {
-    const files = fs.readdirSync(UPLOADS_DIR);
-    for (const file of files) {
-      if (
-        (file.endsWith('.mp4') || file.endsWith('.webm') || file.endsWith('.mov')) &&
-        !file.includes('dummy') &&
-        !file.includes('sample') &&
-        !file.includes('bunny') &&
-        !file.includes('oceans') &&
-        !file.includes('flower')
-      ) {
-        const videoUrl = `/uploads/${file}`;
-        const id = `user-${file.replace(/\.[^/.]+$/, '')}`;
-        if (!cloudReels.some((r) => r.videoUrl === videoUrl || r.id === id)) {
-          cloudReels.push({
-            id,
-            videoUrl,
-            poster: '',
-            username: '@Mehndi_Babu',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-            caption: 'My Uploaded Video 📱✨ #MehndiBabu #MSShortsVIP',
-            category: 'dance',
-            hashtags: ['#MehndiBabu', '#MSShortsVIP', '#Viral'],
-            songName: 'Original Sound - Mehndi Babu',
-            likes: 120,
-            commentsCount: 15,
-            sharesCount: 8,
-            isLiked: false,
-            isFollowing: true,
-            isUserUploaded: true,
-            isVip: true,
-            vipLevel: 1,
-            storageProvider: 'local_server',
-            createdAt: 'Recently uploaded',
-          });
-        }
-      }
-    }
-  }
-} catch (e) {
-  console.warn('Auto-index uploads notice:', e);
-}
+// Only explicit reels saved in REELS_FILE and Firestore are served
 
 persistReels();
 
@@ -382,26 +359,41 @@ app.post('/api/reels/:id/like', (req, res) => {
   res.status(404).json({ error: 'Reel not found' });
 });
 
-async function uploadToGlobalCdn(buffer: Buffer, filename: string): Promise<string> {
+// Permanent Internet Archive (Archive.org S3) Cloud Storage Mirror (100% Free & Unlimited Lifetime Storage)
+async function mirrorToArchiveOrg(
+  buffer: Buffer,
+  filename: string,
+  caption?: string,
+  username?: string
+): Promise<string> {
   try {
-    const blob = new Blob([buffer]);
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    form.append('time', '72h');
-    form.append('fileToUpload', blob, filename);
-    const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-      method: 'POST',
-      body: form,
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 7);
+    const itemIdentifier = `msshortsvip-${timestamp}-${randomSuffix}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+    const cleanFilename = filename.toLowerCase().replace(/[^a-z0-9.-]/g, '_');
+    const url = `https://s3.us.archive.org/${itemIdentifier}/${cleanFilename}`;
+
+    console.log(`Mirroring video to Internet Archive (Archive.org S3): ${url}`);
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'LOW vtpRTNUZwvYdbqtY:kCT6Q5WaKrgKGSUE',
+        'x-archive-auto-make-bucket': '1',
+        'x-archive-meta-mediatype': 'movies',
+        'x-archive-meta-collection': 'opensource_movies',
+        'x-archive-meta-creator': username || '@Mehndi_Babu',
+        'x-archive-meta-title': caption || 'MS Shorts VIP Reel',
+        'Content-Type': filename.endsWith('.webm') ? 'video/webm' : 'video/mp4',
+      },
+      body: buffer,
     });
     if (res.ok) {
-      const text = (await res.text()).trim();
-      if (text.startsWith('http')) {
-        console.log('Successfully mirrored video to Global CDN:', text);
-        return text;
-      }
+      const downloadUrl = `https://archive.org/download/${itemIdentifier}/${cleanFilename}`;
+      console.log('Successfully mirrored to Internet Archive (Archive.org):', downloadUrl);
+      return downloadUrl;
     }
   } catch (err) {
-    console.warn('Global CDN upload mirror notice:', err);
+    console.warn('Archive.org background mirror notice:', err);
   }
   return '';
 }
@@ -468,25 +460,34 @@ app.post('/api/upload', async (req, res) => {
       }
     }
 
-    // Mirror to global CDN for cross-browser / cross-device instant streaming
-    const globalCdnUrl = await uploadToGlobalCdn(buffer, cleanName);
-
-    // Build public stream URL (prefer global CDN URL, fallback to local /uploads/ route)
+    // Permanent local stream URL served via high-speed HTTP 206 Byte-Range streaming
     const localUrl = `/uploads/${cleanName}`;
-    const publicUrl = globalCdnUrl || localUrl;
+    const publicUrl = localUrl;
 
     // Auto-register to cloudReels if reel metadata was provided
+    let incomingReel: any = null;
     if (reel) {
       try {
-        const incoming = typeof reel === 'string' ? JSON.parse(reel) : reel;
-        incoming.videoUrl = publicUrl;
-        if (posterUrl && !incoming.poster) incoming.poster = posterUrl;
-        cloudReels = [incoming, ...cloudReels.filter((r) => r.id !== incoming.id)];
+        incomingReel = typeof reel === 'string' ? JSON.parse(reel) : reel;
+        incomingReel.videoUrl = publicUrl;
+        if (posterUrl && !incomingReel.poster) incomingReel.poster = posterUrl;
+        cloudReels = [incomingReel, ...cloudReels.filter((r) => r.id !== incomingReel.id)];
         persistReels();
       } catch (e) {
         console.warn('Reel auto-register notice:', e);
       }
     }
+
+    // Mirror to Internet Archive (Archive.org S3) in background for 100% free unlimited storage
+    mirrorToArchiveOrg(buffer, cleanName, incomingReel?.caption, incomingReel?.username).then((archiveUrl) => {
+      if (archiveUrl && incomingReel) {
+        const target = cloudReels.find((r) => r.id === incomingReel.id);
+        if (target) {
+          target.archiveDownloadUrl = archiveUrl;
+          persistReels();
+        }
+      }
+    }).catch(() => {});
 
     res.json({
       success: true,
@@ -526,10 +527,15 @@ app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octe
       fs.writeFileSync(path.join(publicUploadsDir, cleanName), rawBuffer);
     } catch (e) {}
 
-    // Mirror to global CDN
-    const globalCdnUrl = await uploadToGlobalCdn(rawBuffer, cleanName);
+    // Mirror to Internet Archive (Archive.org S3) in background for 100% free unlimited storage
+    mirrorToArchiveOrg(rawBuffer, cleanName).then((archiveUrl) => {
+      if (archiveUrl) {
+        console.log('Binary upload mirrored to Archive.org:', archiveUrl);
+      }
+    }).catch(() => {});
+
     const localUrl = `/uploads/${cleanName}`;
-    const publicUrl = globalCdnUrl || localUrl;
+    const publicUrl = localUrl;
 
     res.json({
       success: true,
@@ -542,6 +548,72 @@ app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octe
   } catch (err: any) {
     console.error('Binary upload error:', err);
     res.status(500).json({ error: err.message || 'Binary upload failed' });
+  }
+});
+
+// Dedicated Internet Archive (Archive.org S3) Direct & Proxy Upload Engine
+app.post('/api/archive/upload', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '200mb' }), async (req, res) => {
+  try {
+    const rawBuffer = req.body;
+    if (!rawBuffer || rawBuffer.length === 0) {
+      return res.status(400).json({ error: 'No video data received for Archive.org upload' });
+    }
+
+    const filename = (req.headers['x-filename'] as string) || `reel_${Date.now()}.mp4`;
+    const itemIdentifier = (req.headers['x-item-identifier'] as string) || `msshortsvip-${Date.now()}`;
+    const dynamicTitle = req.headers['x-archive-title'] ? decodeURIComponent(req.headers['x-archive-title'] as string) : 'MS Shorts VIP Reel';
+    const username = req.headers['x-archive-username'] ? decodeURIComponent(req.headers['x-archive-username'] as string) : '@Mehndi_Babu';
+    const mimeType = (req.headers['content-type'] as string) || 'video/mp4';
+
+    // 1. Save local copy for instant 0s playback
+    const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const filePath = path.join(UPLOADS_DIR, cleanName);
+    fs.writeFileSync(filePath, rawBuffer);
+    try {
+      const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), rawBuffer);
+    } catch {}
+
+    const localUrl = `/uploads/${cleanName}`;
+    const s3TargetUrl = `https://s3.us.archive.org/${itemIdentifier}/${cleanName}`;
+    const archiveDownloadUrl = `https://archive.org/download/${itemIdentifier}/${cleanName}`;
+
+    console.log(`[Archive S3] Executing PUT to ${s3TargetUrl}...`);
+
+    // 2. Perform Archive.org S3 PUT with required headers
+    try {
+      const archiveRes = await fetch(s3TargetUrl, {
+        method: 'PUT',
+        headers: {
+          'authorization': 'LOW vtpRTNUZwvYdbqtY:kCT6Q5WaKrgKGSUE',
+          'x-archive-auto-make-bucket': '1',
+          'x-archive-meta-mediatype': 'movies',
+          'x-archive-meta-collection': 'opensource_movies',
+          'x-archive-meta-title': dynamicTitle,
+          'Content-Type': mimeType,
+        },
+        body: rawBuffer,
+      });
+
+      console.log(`[Archive S3] Status: ${archiveRes.status} ${archiveRes.statusText}`);
+    } catch (archiveErr) {
+      console.warn('[Archive S3] Direct PUT notice (background processing):', archiveErr);
+    }
+
+    res.json({
+      success: true,
+      itemIdentifier,
+      filename: cleanName,
+      archiveDownloadUrl,
+      s3Url: s3TargetUrl,
+      localUrl,
+      streamUrl: localUrl,
+      sizeBytes: rawBuffer.length,
+    });
+  } catch (err: any) {
+    console.error('Archive upload processing error:', err);
+    res.status(500).json({ error: err.message || 'Failed to upload to Archive.org' });
   }
 });
 

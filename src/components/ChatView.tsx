@@ -17,6 +17,8 @@ import {
   CheckCircle2,
   Share2,
   Trash2,
+  LogIn,
+  UserPlus,
 } from 'lucide-react';
 
 interface ChatViewProps {
@@ -25,6 +27,7 @@ interface ChatViewProps {
   notifications: AppNotification[];
   onOpenNotifications: () => void;
   onWatchReel?: (reel: VideoReel) => void;
+  onOpenAuthModal?: (mode?: 'signin' | 'register', prompt?: string) => void;
 }
 
 const DEFAULT_CONVERSATIONS: ChatConversation[] = [
@@ -166,6 +169,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   notifications,
   onOpenNotifications,
   onWatchReel,
+  onOpenAuthModal,
 }) => {
   const [conversations, setConversations] = useState<ChatConversation[]>(() => {
     try {
@@ -342,6 +346,40 @@ export const ChatView: React.FC<ChatViewProps> = ({
     if (filterTab === 'unread') return c.unreadCount > 0;
     return true;
   });
+
+  if (!authUser) {
+    return (
+      <div className="w-full h-full bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center select-none pb-24">
+        <div className="w-full max-w-sm p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col items-center gap-4 animate-scale-up">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+            <MessageSquare className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-lg font-extrabold text-white">Direct Messages & Chat / चैट इनबॉक्स</h2>
+            <p className="text-xs text-slate-400 leading-relaxed max-w-xs">
+              Log in or create your personal account to chat with creators, share reels, and send VIP messages.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2.5 w-full pt-1">
+            <button
+              onClick={() => onOpenAuthModal && onOpenAuthModal('signin', 'चैट करने के लिए कृपया लॉगिन करें।')}
+              className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white font-extrabold text-xs shadow-xl flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>लॉग इन करें / Sign In</span>
+            </button>
+            <button
+              onClick={() => onOpenAuthModal && onOpenAuthModal('register', 'नया अकाउंट बनाकर क्रिएटर्स से चैट करें।')}
+              className="w-full py-3 px-4 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-xs shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4 text-emerald-400" />
+              <span>नया अकाउंट बनाएं / Register</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full bg-slate-950 text-white flex flex-col relative pb-20 select-none">

@@ -94,6 +94,7 @@ export interface VideoReel {
   isReported?: boolean;
   storageProvider?: 'direct' | 'archive.org' | 'akai.in';
   archiveChannelUrl?: string;
+  archiveDownloadUrl?: string;
   filterApplied?: string;
   createdAt: string;
 }
@@ -250,5 +251,6 @@ export interface AuthUser {
   vipRank?: number;
   vipTitle?: string;
   vipSince?: string;
+  isAdmin?: boolean;
 }
 

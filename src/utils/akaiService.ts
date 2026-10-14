@@ -143,27 +143,8 @@ export async function uploadToFreeCloudPipeline(
       }
     }
 
-    // 3. Fast Global Cloud CDN upload (Litterbox direct MP4 URL streamable on all devices globally)
-    publicCdnUrl = '';
-    try {
-      const formData = new FormData();
-      formData.append('reqtype', 'fileupload');
-      formData.append('time', '72h');
-      formData.append('fileToUpload', fileOrBlob, filename);
-      const cdnRes = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-        method: 'POST',
-        body: formData,
-      });
-      if (cdnRes.ok) {
-        const text = (await cdnRes.text()).trim();
-        if (text && text.startsWith('http')) {
-          publicCdnUrl = text;
-          console.log('Global CDN upload successful:', publicCdnUrl);
-        }
-      }
-    } catch (cdnErr) {
-      console.warn('Global CDN upload notice:', cdnErr);
-    }
+    // 3. Guaranteed universal public stream URL from server
+    publicCdnUrl = publicServerUrl;
 
     // 4. Background archive sync
     const archiveAuthHeader = `LOW ${CLOUD_STORAGE_CONFIG.archiveAccessKey}:${CLOUD_STORAGE_CONFIG.archiveSecretKey}`;
@@ -188,8 +169,8 @@ export async function uploadToFreeCloudPipeline(
     if (onProgress) onProgress(100);
   }
 
-  // Guaranteed universal public stream URL (prioritize global CDN for 100% cross-device playback)
-  let permanentStreamUrl = publicCdnUrl || publicServerUrl;
+  // Guaranteed universal public stream URL (prioritize fast direct server endpoint for instant byte-range streaming!)
+  let permanentStreamUrl = publicServerUrl || publicCdnUrl;
   if (permanentStreamUrl && permanentStreamUrl.startsWith('/uploads/')) {
     permanentStreamUrl = `${getApiBaseUrl()}${permanentStreamUrl}`;
   }

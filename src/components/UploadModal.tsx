@@ -112,31 +112,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </button>
         </div>
 
-        {/* 100% Free Unlimited Storage Active Banner */}
-        <div
-          onClick={() => {
-            if (onOpenStorageModal) {
-              onClose();
-              onOpenStorageModal();
-            }
-          }}
-          className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/30 hover:bg-emerald-950/60 transition-all cursor-pointer flex items-center justify-between gap-2"
-        >
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-              <Cloud className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-black text-white">100% Free Unlimited Storage</span>
-                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded-full bg-emerald-500 text-black">
-                  ₹0 COST
-                </span>
-              </div>
-              <p className="text-[10px] text-emerald-300/80">No subscription, no paid keys, permanent multi-cloud sync</p>
-            </div>
+        {/* Archive.org S3 Storage Engine Status Banner */}
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-indigo-500/15 to-purple-500/15 border border-indigo-500/30 text-indigo-200 text-[11px]">
+          <Cloud className="w-4 h-4 text-indigo-400 shrink-0 animate-pulse" />
+          <div className="flex flex-col">
+            <span className="font-bold text-white text-[11px]">Archive.org S3 Unlimited Cloud Active</span>
+            <span className="text-[10px] text-indigo-300/80">Auto 720p / 2.2 Mbps optimization • 100% Free Lifetime Storage</span>
           </div>
-          <span className="text-[10px] font-bold text-emerald-400 hover:underline shrink-0">Hub &gt;</span>
         </div>
 
         {/* Hidden File Input for Gallery Video */}
@@ -229,7 +211,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 font-extrabold text-sm text-white shadow-lg shadow-pink-500/30 hover:opacity-90 active:scale-98 transition-all flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4" />
-              <span>{isProcessing ? 'Processing & Syncing...' : 'Publish Video Reel (Free Cloud)'}</span>
+              <span>{isProcessing ? 'Processing & Syncing...' : 'Publish Video Reel / वीडियो पोस्ट करें'}</span>
             </button>
           </div>
         ) : (
@@ -248,12 +230,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   <h4 className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">
                     Upload Video from Device
                   </h4>
-                  <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    Unlimited
+                  <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300 border border-pink-500/30">
+                    Direct MP4
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Select any MP4, WebM or MOV video from phone/PC (Free Multi-Cloud Storage)
+                  Select any MP4, WebM or MOV video from your phone or PC
                 </p>
               </div>
             </div>
@@ -310,14 +292,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               </div>
             </div>
 
-            {/* Free Cloud Video Link (Google Drive / Archive.org / Web MP4) */}
+            {/* Direct Video Link (MP4 / Web Video URL) */}
             <div className="pt-2 border-t border-slate-800/80 flex flex-col gap-1.5">
               <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
                 <span className="flex items-center gap-1 text-amber-300">
                   <Link2 className="w-3.5 h-3.5" />
-                  <span>Paste Free Cloud Video URL (Drive / Archive.org / MP4):</span>
+                  <span>Paste Direct Video URL (MP4 / Web Video):</span>
                 </span>
-                <span className="text-[10px] text-emerald-400 font-mono font-bold">100% Free</span>
               </label>
               <div className="flex gap-2">
                 <input

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { VideoReel, MusicTrack, ArchiveConfig, PlatformRevenueStats, WithdrawalRequest } from '../types';
+import { VideoReel, MusicTrack, ArchiveConfig, PlatformRevenueStats, WithdrawalRequest, AuthUser } from '../types';
 import { getCleanVideoUrl } from '../utils/videoUtils';
 import {
   X,
@@ -33,6 +33,7 @@ import {
 interface AdminDashboardModalProps {
   isOpen: boolean;
   onClose: () => void;
+  authUser?: AuthUser | null;
   reels: VideoReel[];
   onDeleteReel: (reelId: string) => void;
   musicTracks: MusicTrack[];
@@ -48,6 +49,7 @@ interface AdminDashboardModalProps {
 export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   isOpen,
   onClose,
+  authUser,
   reels,
   onDeleteReel,
   musicTracks,
@@ -89,6 +91,30 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const isAdmin = authUser && (authUser.email === 'mehndibabu84@gmail.com' || authUser.isAdmin);
+
+  if (!isAdmin) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md select-none animate-fade-in">
+        <div className="w-full max-w-sm bg-slate-900 border border-red-500/50 rounded-3xl p-6 text-center text-white shadow-2xl animate-scale-up">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 mx-auto flex items-center justify-center mb-3 border border-red-500/40">
+            <ShieldAlert className="w-6 h-6 animate-pulse" />
+          </div>
+          <h3 className="text-base font-extrabold text-white">Admin Control Panel Restricted</h3>
+          <p className="text-xs text-slate-300 mt-2 mb-4 leading-relaxed">
+            यह केवल एडमिन (@Mehndi_Babu / mehndibabu84@gmail.com) के लिए सुरक्षित है। कृपया एडमिन खाते से लॉगिन करें।
+          </p>
+          <button
+            onClick={onClose}
+            className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all cursor-pointer"
+          >
+            Close / बंद करें
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const showToast = (msg: string) => {
     setToastMessage(msg);

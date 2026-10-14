@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { VirtualGift, LiveChatMessage } from '../types';
+import { VirtualGift, LiveChatMessage, AuthUser } from '../types';
 import { VIRTUAL_GIFTS, INITIAL_LIVE_MESSAGES } from '../data/mockData';
-import { Users, Send, Coins, Heart, Sparkles, AlertCircle, PlusCircle } from 'lucide-react';
+import { Users, Send, Coins, Heart, Sparkles, AlertCircle, PlusCircle, LogIn } from 'lucide-react';
 
 interface LiveStreamViewProps {
   walletBalance: number;
+  authUser?: AuthUser | null;
   onDeductCoins: (amount: number, giftName: string) => boolean;
   onRechargeShortcut: () => void;
+  onRequireAuth?: (message: string) => void;
 }
 
 interface FloatingGiftAnimation {
@@ -17,8 +19,10 @@ interface FloatingGiftAnimation {
 
 export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   walletBalance,
+  authUser,
   onDeductCoins,
   onRechargeShortcut,
+  onRequireAuth,
 }) => {
   const [chatMessages, setChatMessages] = useState<LiveChatMessage[]>(INITIAL_LIVE_MESSAGES);
   const [inputMsg, setInputMsg] = useState('');
@@ -67,12 +71,18 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
 
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!authUser) {
+      if (onRequireAuth) {
+        onRequireAuth('लाइव चैट में मैसेज भेजने के लिए कृपया पहले लॉगिन करें।');
+      }
+      return;
+    }
     if (!inputMsg.trim()) return;
 
     const myMsg: LiveChatMessage = {
       id: `live-user-${Date.now()}`,
-      username: 'Mehndi_Babu (You)',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      username: `${authUser.displayName || authUser.username} (You)`,
+      avatar: authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       text: inputMsg.trim(),
     };
 
@@ -81,6 +91,12 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
   };
 
   const handleSendGift = (gift: VirtualGift) => {
+    if (!authUser) {
+      if (onRequireAuth) {
+        onRequireAuth('लाइव गिफ्ट भेजने के लिए कृपया पहले लॉगिन करें।');
+      }
+      return;
+    }
     const success = onDeductCoins(gift.cost, gift.name);
 
     if (success) {
@@ -98,8 +114,8 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
       // Add gift notice in live chat
       const giftMsg: LiveChatMessage = {
         id: `gift-msg-${Date.now()}`,
-        username: 'Mehndi_Babu (You)',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+        username: `${authUser.displayName || authUser.username} (You)`,
+        avatar: authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
         text: `Sent ${gift.name} ${gift.icon}! (-${gift.cost} Coins)`,
         isGiftNotice: true,
         giftIcon: gift.icon,
@@ -230,18 +246,30 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({
 
         {/* Live Chat Input */}
         <form onSubmit={handleSendChat} className="mt-3 flex items-center gap-2">
-          <input
-            type="text"
-            value={inputMsg}
-            onChange={(e) => setInputMsg(e.target.value)}
-            placeholder="Send live comment..."
-            className="flex-1 px-4 py-2 rounded-full bg-black/60 border border-white/20 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-pink-500 backdrop-blur-md"
-          />
+          <div
+            className="flex-1 relative flex items-center"
+            onClick={() => {
+              if (!authUser && onRequireAuth) {
+                onRequireAuth('लाइव चैट में भाग लेने के लिए कृपया पहले लॉगिन करें।');
+              }
+            }}
+          >
+            <input
+              type="text"
+              value={inputMsg}
+              onChange={(e) => setInputMsg(e.target.value)}
+              disabled={!authUser}
+              placeholder={
+                authUser ? 'Send live comment...' : 'लाइव चैट के लिए लॉगिन करें / Login to comment...'
+              }
+              className="w-full px-4 py-2 rounded-full bg-black/60 border border-white/20 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-pink-500 backdrop-blur-md disabled:cursor-pointer"
+            />
+          </div>
           <button
             type="submit"
-            className="p-2.5 rounded-full bg-pink-600 hover:bg-pink-500 text-white shadow-lg transition-all active:scale-95"
+            className="p-2.5 rounded-full bg-pink-600 hover:bg-pink-500 text-white shadow-lg transition-all active:scale-95 shrink-0 cursor-pointer"
           >
-            <Send className="w-4 h-4" />
+            {authUser ? <Send className="w-4 h-4" /> : <LogIn className="w-4 h-4 text-white" />}
           </button>
         </form>
       </div>
