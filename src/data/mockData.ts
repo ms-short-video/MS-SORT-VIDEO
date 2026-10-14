@@ -36,9 +36,9 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     type: 'like',
     username: '@sarah_vibe',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
-    text: '❤️ @sarah_vibe liked your video "Big Buck Bunny 4K VIP Reel!"',
+    text: '❤️ @sarah_vibe liked your uploaded VIP Reel!',
     timeAgo: '45m ago',
-    reelId: 'reel-vip-1',
+    reelId: 'user-reel-1791983500312-4swis',
     isUnread: true,
   },
   {
@@ -48,7 +48,7 @@ export const INITIAL_NOTIFICATIONS: AppNotification[] = [
     avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&auto=format&fit=crop&q=80',
     text: '💬 @tech_guru commented on your video: "MS Shorts VIP Engine + Archive.org is top tier! 🔥"',
     timeAgo: '2h ago',
-    reelId: 'reel-vip-1',
+    reelId: 'user-reel-1791983500312-4swis',
     isUnread: false,
   },
 ];

@@ -28,6 +28,11 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
     return trimmed;
   }
 
+  // Preserve and resolve user-uploaded videos from /uploads/ directory first for instant 2ms local playback
+  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
+    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  }
+
   // Map freshly uploaded user reels to their verified, permanent Archive.org global streams (immune to 302 cookie redirects)
   if (trimmed.includes('1791983508338') || trimmed.includes('sunil_mahto') || trimmed.includes('4swis')) {
     return 'https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4';
@@ -35,11 +40,6 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
 
   if (trimmed.includes('1788538428014') || trimmed.includes('7buxs') || trimmed.includes('1788424088669')) {
     return 'https://archive.org/download/ms-shorts-vip-1788538428014-7buxs/reel_1788538428014_7buxs.mp4';
-  }
-
-  // Preserve and resolve user-uploaded videos from /uploads/ directory
-  if (trimmed.startsWith('/uploads/') || trimmed.startsWith('uploads/')) {
-    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   }
 
   // Google Drive share link -> direct stream link

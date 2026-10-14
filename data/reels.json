@@ -1,7 +1,7 @@
 [
   {
     "id": "user-reel-1791983500312-4swis",
-    "videoUrl": "https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4",
+    "videoUrl": "/uploads/reel_1791983508338.mp4",
     "archiveDownloadUrl": "https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4",
     "archiveChannelUrl": "https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4",
     "poster": "/uploads/poster_reel_1791983508338.jpg",
@@ -15,9 +15,9 @@
       "#Viral"
     ],
     "songName": "Original Audio - @sunil_mahto",
-    "likes": 1,
-    "commentsCount": 0,
-    "sharesCount": 0,
+    "likes": 42,
+    "commentsCount": 3,
+    "sharesCount": 5,
     "isLiked": true,
     "isFollowing": true,
     "isUserUploaded": true,
@@ -25,5 +25,32 @@
     "vipLevel": 1,
     "storageProvider": "archive.org",
     "createdAt": "Just now"
+  },
+  {
+    "id": "user-reel_1788424088669_test_upload",
+    "videoUrl": "/uploads/reel_1788538428014_7buxs.mp4",
+    "archiveDownloadUrl": "https://archive.org/download/ms-shorts-vip-1788538428014-7buxs/reel_1788538428014_7buxs.mp4",
+    "archiveChannelUrl": "https://archive.org/download/ms-shorts-vip-1788538428014-7buxs/reel_1788538428014_7buxs.mp4",
+    "poster": "/uploads/poster_reel_1788538428014_7buxs.jpg",
+    "username": "@Mehndi_Babu",
+    "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+    "caption": "My Uploaded Video 📱✨ #MehndiBabu #MSShortsVIP",
+    "category": "dance",
+    "hashtags": [
+      "#MehndiBabu",
+      "#MSShortsVIP",
+      "#Viral"
+    ],
+    "songName": "Original Sound - Mehndi Babu",
+    "likes": 120,
+    "commentsCount": 15,
+    "sharesCount": 8,
+    "isLiked": false,
+    "isFollowing": true,
+    "isUserUploaded": true,
+    "isVip": true,
+    "vipLevel": 1,
+    "storageProvider": "archive.org",
+    "createdAt": "Recently uploaded"
   }
 ]
