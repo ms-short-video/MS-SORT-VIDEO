@@ -232,17 +232,33 @@ export async function publishReelToCloud(reel: VideoReel): Promise<boolean> {
 }
 
 /**
- * Delete a reel document from the central cloud database
+ * Delete a reel document from the central cloud database with secure authorization
  */
-export async function deleteReelFromCloud(reelId: string): Promise<boolean> {
+export async function deleteReelFromCloud(
+  reelId: string,
+  authUser?: { uid?: string; email?: string; username?: string } | null
+): Promise<{ success: boolean; error?: string }> {
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (authUser?.uid) headers['x-user-uid'] = authUser.uid;
+    if (authUser?.email) headers['x-user-email'] = authUser.email;
+    if (authUser?.username) headers['x-user-username'] = authUser.username;
+
     const res = await fetch(`${getApiBaseUrl()}/api/reels/${reelId}`, {
       method: 'DELETE',
+      headers,
     });
-    return res.ok;
-  } catch (err) {
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { success: false, error: data.error || `Deletion failed with status ${res.status}` };
+    }
+    return { success: true };
+  } catch (err: any) {
     console.warn('Cloud reel deletion notice:', err);
-    return false;
+    return { success: false, error: err?.message || 'Network error while deleting video' };
   }
 }
 

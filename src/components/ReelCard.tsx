@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { VideoReel } from '../types';
+import { VideoReel, AuthUser } from '../types';
 import { getCleanVideoUrl } from '../utils/videoUtils';
+import { canUserDeleteReel } from '../utils/authUtils';
 import { getVideoDataUrl, saveVideoBlob } from '../utils/localVideoStore';
 import { prewarmVideoChunk, VideoLifecycleState } from '../utils/fastVideoEngine';
 import {
@@ -16,12 +17,16 @@ import {
   Gift,
   Crown,
   Sparkles,
+  AlertTriangle,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react';
 
 interface ReelCardProps {
   reel: VideoReel;
   index: number;
   isActive: boolean;
+  authUser?: AuthUser | null;
   preloadMode?: 'auto' | 'metadata' | 'none';
   preloadDistance?: number;
   lifecycleState?: VideoLifecycleState;
@@ -36,6 +41,7 @@ interface ReelCardProps {
   onSendGiftClick?: (reel: VideoReel) => void;
   onFollowToggle?: (username: string) => void;
   onWatchTimeUpdate?: (reel: VideoReel, seconds: number, isLooped: boolean) => void;
+  onDeleteReel?: (reelId: string) => void;
 }
 
 // Module-level in-memory cache to prevent duplicate byte-range prewarm fetches
@@ -64,6 +70,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   reel,
   index,
   isActive,
+  authUser,
   preloadMode = 'none',
   preloadDistance,
   lifecycleState = 'standby',
@@ -78,32 +85,47 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   onSendGiftClick,
   onFollowToggle,
   onWatchTimeUpdate,
+  onDeleteReel,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const touchCoordRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const lastTouchTimeRef = useRef<number>(0);
+  const retryCountRef = useRef<number>(0);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [isBuffering, setIsBuffering] = useState<boolean>(false);
   const [hasRenderedFrame, setHasRenderedFrame] = useState<boolean>(false);
+  const [hasPlaybackError, setHasPlaybackError] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
   const [isFollowing, setIsFollowing] = useState<boolean>(reel.isFollowing || false);
   const [showHeartAnim, setShowHeartAnim] = useState<boolean>(false);
-  const [watchSeconds, setWatchSeconds] = useState<number>(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const watchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const watchTimeSecondsRef = useRef<number>(0);
   const loopCountRef = useRef<number>(0);
 
   const [videoSrc, setVideoSrc] = useState<string>(() => getCleanVideoUrl(reel.videoUrl));
+  const lastConfiguredSrcRef = useRef<string>(getCleanVideoUrl(reel.videoUrl));
 
-  // Active watch time tracking for AI Recommendation Algorithm
+  // Reset errors and retry counter whenever reel becomes active in viewport
   useEffect(() => {
     if (isActive) {
-      setWatchSeconds(0);
+      setHasPlaybackError(false);
+      setErrorMessage('');
+      retryCountRef.current = 0;
+    }
+  }, [isActive]);
+
+  // Active watch time tracking for AI Recommendation Algorithm (without re-rendering state every second)
+  useEffect(() => {
+    if (isActive) {
+      watchTimeSecondsRef.current = 0;
       loopCountRef.current = 0;
       const startTime = Date.now();
 
       watchTimerRef.current = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        setWatchSeconds(elapsed);
+        watchTimeSecondsRef.current = elapsed;
         if (onWatchTimeUpdate && elapsed > 0 && elapsed % 4 === 0) {
           onWatchTimeUpdate(reel, 4, loopCountRef.current > 0);
         }
@@ -158,33 +180,44 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     resolveVideo();
   }, [resolveVideo]);
 
-  // If a video fails to decode or play from network, automatically recover from Archive.org!
+  // Clean error recovery without disrupting fast local playback
   const handleVideoError = async () => {
-    console.warn('Network video stream notice, attempting Archive.org recovery:', reel.id, videoSrc);
-
-    // 1. Try Archive.org permanent cloud mirror
-    const archiveUrl = (reel as any).archiveDownloadUrl || (reel as any).archiveUrl || reel.archiveChannelUrl;
-    if (archiveUrl) {
-      const cleanArchive = getCleanVideoUrl(archiveUrl);
-      if (cleanArchive && cleanArchive !== videoSrc) {
-        console.log('Seamlessly switching to Archive.org permanent cloud storage:', cleanArchive);
-        setVideoSrc(cleanArchive);
-        setIsBuffering(false);
-        if (videoRef.current) {
-          videoRef.current.load();
-          videoRef.current.play().catch(() => {});
-        }
-        return;
-      }
+    const video = videoRef.current;
+    // MEDIA_ERR_ABORTED (code 1) is dispatched normally when scrolling away; ignore it!
+    if (video?.error?.code === 1) {
+      return;
+    }
+    if (!isActive) {
+      return;
     }
 
-    // 2. Check local device IndexedDB cache
+    console.warn('Playback notice for reel:', reel.id, videoSrc, 'Attempting auto-recovery...');
+
+    // 1. If external stream failed, route through high-speed server stream proxy
+    if (videoSrc.startsWith('http') && !videoSrc.includes('/api/stream') && !videoSrc.includes('/uploads/')) {
+      const proxied = `/api/stream?url=${encodeURIComponent(videoSrc)}`;
+      setVideoSrc(proxied);
+      setHasPlaybackError(false);
+      setIsBuffering(false);
+      if (videoRef.current) {
+        lastConfiguredSrcRef.current = proxied;
+        videoRef.current.src = proxied;
+        videoRef.current.load();
+        videoRef.current.play().catch(() => {});
+      }
+      return;
+    }
+
+    // 2. Try IndexedDB cached video data
     try {
       const localData = await getVideoDataUrl(reel.id);
       if (localData && localData !== videoSrc) {
         setVideoSrc(localData);
+        setHasPlaybackError(false);
         setIsBuffering(false);
         if (videoRef.current) {
+          lastConfiguredSrcRef.current = localData;
+          videoRef.current.src = localData;
           videoRef.current.load();
           videoRef.current.play().catch(() => {});
         }
@@ -194,11 +227,54 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       // ignore
     }
 
+    // 3. Gentle auto-retry once
+    if (retryCountRef.current < 1) {
+      retryCountRef.current += 1;
+      setTimeout(() => {
+        if (videoRef.current && isActive) {
+          videoRef.current.currentTime = 0;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 500);
+      return;
+    }
+
     setIsPlaying(false);
     setIsBuffering(false);
+    setHasPlaybackError(true);
+    setErrorMessage('वीडियो लोड करने में समस्या आई (नेटवर्क धीमा हो सकता है)');
   };
 
-  // TikTok / Mauj-grade Smart Preload & Range Buffer Engine:
+  const handleManualRetry = () => {
+    retryCountRef.current = 0;
+    setHasPlaybackError(false);
+    setIsBuffering(true);
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Reload and attempt playback
+    video.currentTime = 0;
+    video.load();
+    video.play()
+      .then(() => {
+        setIsPlaying(true);
+        setIsBuffering(false);
+        setHasPlaybackError(false);
+      })
+      .catch(() => {
+        video.muted = true;
+        video.play().then(() => {
+          setIsPlaying(true);
+          setIsBuffering(false);
+          setHasPlaybackError(false);
+        }).catch(() => {
+          setHasPlaybackError(true);
+          setIsBuffering(false);
+        });
+      });
+  };
+
+  // TikTok / Mauj-grade Smart Preload & Range Buffer Engine
   useEffect(() => {
     if (!videoSrc) return;
 
@@ -210,35 +286,24 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     const video = videoRef.current;
     if (!video) return;
 
-    // 2. Hardware Decoder & Memory Guard for budget Android phones:
-    // If card is far outside active viewport window (|dist| > 2 or unloaded), detach video src
-    if (lifecycleState === 'unloaded' || (preloadDistance !== undefined && Math.abs(preloadDistance) > 2)) {
+    // 2. Hardware Decoder & Memory Guard:
+    // If card is outside active viewport window (|dist| > 3), pause and mute
+    if (lifecycleState === 'unloaded' || (preloadDistance !== undefined && Math.abs(preloadDistance) > 3)) {
       video.pause();
       video.muted = true;
-      if (video.getAttribute('src')) {
-        video.removeAttribute('src');
-        video.load();
-      }
       return;
     }
 
-    // 3. For standby / metadata / active videos: ensure src is properly attached
-    const currentSrc = video.currentSrc || video.src || video.getAttribute('src');
-    if (!currentSrc || (!currentSrc.includes(videoSrc) && currentSrc !== videoSrc)) {
+    // 3. For standby / metadata / active videos: ensure src is properly attached without redundant resets
+    if (lastConfiguredSrcRef.current !== videoSrc || !video.getAttribute('src')) {
       video.src = videoSrc;
+      lastConfiguredSrcRef.current = videoSrc;
     }
 
     if (!isActive) {
       video.muted = true;
       video.pause();
       video.preload = preloadMode;
-      if (preloadMode === 'auto' && video.readyState < 2) {
-        try {
-          video.load();
-        } catch {
-          // ignore
-        }
-      }
     }
   }, [isActive, shouldPreloadBuffer, lifecycleState, preloadMode, preloadDistance, videoSrc, reel.id]);
 
@@ -554,8 +619,38 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         </div>
       )}
 
+      {/* Retry Error Overlay with manual retry action */}
+      {hasPlaybackError && isActive && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            handleManualRetry();
+          }}
+          className="absolute inset-0 flex flex-col items-center justify-center z-30 bg-black/85 backdrop-blur-md cursor-pointer p-6 text-center select-none"
+        >
+          <div className="w-16 h-16 rounded-full bg-rose-500/20 border-2 border-rose-500/50 flex items-center justify-center text-rose-400 mb-3 animate-pulse">
+            <RotateCcw className="w-8 h-8" />
+          </div>
+          <h4 className="text-sm font-bold text-white mb-1">वीडियो लोड करने में समस्या आई</h4>
+          <p className="text-xs text-slate-300 max-w-xs mb-4">
+            {errorMessage || 'कृपया दोबारा प्रयास करें या इंटरनेट कनेक्शन जांचें'}
+          </p>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleManualRetry();
+            }}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 text-white font-extrabold text-xs shadow-xl active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>पुनः प्रयास करें (Tap to Retry)</span>
+          </button>
+        </div>
+      )}
+
       {/* Play Overlay Icon when paused with single-tap gesture */}
-      {!isPlaying && (
+      {!isPlaying && !hasPlaybackError && (
         <div
           onClick={(e) => {
             e.stopPropagation();
@@ -823,6 +918,23 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           </button>
         )}
 
+        {/* Author / Admin Secure Delete Action */}
+        {canUserDeleteReel(reel, authUser) && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDeleteConfirm(true);
+            }}
+            className="flex flex-col items-center gap-1 group active:scale-90 transition-transform cursor-pointer"
+            title="Delete this Video / वीडियो हटाएं"
+          >
+            <div className="p-3 rounded-full bg-red-600/80 border border-red-400 text-white backdrop-blur-md hover:bg-red-500 transition-all shadow-xl hover:scale-105">
+              <Trash2 className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-[10px] font-bold text-red-300 drop-shadow">Delete</span>
+          </button>
+        )}
+
         {/* Spinning Record Disk (Clickable to use sound) */}
         <div
           onClick={(e) => {
@@ -844,6 +956,43 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in text-white select-none"
+        >
+          <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-3xl p-5 text-center shadow-2xl flex flex-col items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center text-red-400">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-black text-white">वीडियो पूरी तरह हटाएं?</h3>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              यह वीडियो आपकी प्रोफाइल और पब्लिक फ़ीड से हमेशा के लिए डिलीट हो जाएगा।
+            </p>
+            <div className="flex w-full gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition-colors cursor-pointer"
+              >
+                रद्द करें
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  if (onDeleteReel) onDeleteReel(reel.id);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-xs font-extrabold text-white transition-colors shadow-lg shadow-red-500/30 cursor-pointer"
+              >
+                हाँ, हटाएं
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

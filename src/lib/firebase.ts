@@ -16,6 +16,7 @@ import {
   doc,
   getDocs,
   getDoc,
+  deleteDoc,
 } from 'firebase/firestore';
 import { AuthUser, VideoReel } from '../types';
 import firebaseConfigJson from '../../firebase-applet-config.json';
@@ -381,4 +382,24 @@ export function subscribeToFirestoreReels(onReelsUpdate: (reels: VideoReel[]) =>
     return () => {};
   }
 }
+
+/**
+ * Delete a reel document from Firestore database
+ */
+export async function deleteReelFromFirestore(
+  reelId: string,
+  userUid?: string,
+  isAdmin: boolean = false
+): Promise<boolean> {
+  try {
+    const reelRef = doc(db, 'reels', reelId);
+    await deleteDoc(reelRef);
+    console.log('Successfully deleted reel from Firestore:', reelId);
+    return true;
+  } catch (err) {
+    console.warn('Firestore delete reel notice:', err);
+    return false;
+  }
+}
+
 

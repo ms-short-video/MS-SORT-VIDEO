@@ -77,7 +77,9 @@ export interface VideoReel {
   poster?: string;
   username: string;
   avatar: string;
+  ownerUid?: string;
   uploaderId?: string;
+  uploaderEmail?: string;
   caption: string;
   category?: ReelCategory;
   hashtags: string[];

@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ActiveTab, VideoReel, VideoComment, UploadProgress, WalletTransaction, MusicTrack, ArchiveConfig, AppNotification, AuthUser, FeedCategoryFilter, ReelCategory, UserTasteProfile, VirtualGift, WithdrawalRequest, PlatformRevenueStats } from './types';
 import { INITIAL_REELS, INITIAL_COMMENTS, INITIAL_MUSIC_TRACKS, DEFAULT_ARCHIVE_CONFIG, INITIAL_NOTIFICATIONS } from './data/mockData';
-import { signInWithGoogle, logoutUser, DEFAULT_GOOGLE_USER, saveReelToFirestore, subscribeToFirestoreReels, seedDefaultReelsIfEmpty } from './lib/firebase';
+import { signInWithGoogle, logoutUser, DEFAULT_GOOGLE_USER, saveReelToFirestore, subscribeToFirestoreReels, seedDefaultReelsIfEmpty, deleteReelFromFirestore } from './lib/firebase';
 import { uploadToFreeCloudPipeline, fetchCloudReels, publishReelToCloud, deleteReelFromCloud, toggleReelLikeOnCloud, fetchAkaiPublicVideos } from './utils/akaiService';
+import { canUserDeleteReel, isUserAdmin } from './utils/authUtils';
 import { getSavedTasteProfile, recordWatchInteraction, rankReelsForFeed } from './utils/recommendationEngine';
 import { saveVideoBlob } from './utils/localVideoStore';
 import { getCleanVideoUrl } from './utils/videoUtils';
@@ -73,15 +74,50 @@ export function isDummyReel(r: any): boolean {
   return false;
 }
 
-export function deduplicateReels(items: VideoReel[]): VideoReel[] {
-  const seen = new Set<string>();
+export function deduplicateReels(items: VideoReel[], deletedIds?: Set<string>): VideoReel[] {
+  const seenId = new Set<string>();
+  const seenMedia = new Set<string>();
   const result: VideoReel[] = [];
+
   for (const item of items) {
     if (!item || !item.id || isDummyReel(item)) continue;
-    if (!seen.has(item.id)) {
-      seen.add(item.id);
-      result.push(item);
+    if (deletedIds && deletedIds.has(item.id)) continue;
+
+    // Extract signature based on media path/filename
+    const cleanVid = String(item.videoUrl || '').trim();
+    const cleanArchive = String(item.archiveDownloadUrl || (item as any).archiveChannelUrl || '').trim();
+
+    // Extract base filename if present (e.g. reel_1791983508338.mp4)
+    const vidFileMatch = cleanVid.match(/reel_[a-zA-Z0-9_-]+\.(mp4|webm|mov)/i);
+    const archiveFileMatch = cleanArchive.match(/reel_[a-zA-Z0-9_-]+\.(mp4|webm|mov)/i);
+    const archiveItemMatch = cleanArchive.match(/download\/([a-zA-Z0-9_-]+)/i);
+
+    const mediaSignature = vidFileMatch?.[0] || archiveFileMatch?.[0] || archiveItemMatch?.[1] || (cleanVid.length > 10 ? cleanVid : '');
+
+    if (seenId.has(item.id)) {
+      continue;
     }
+
+    if (mediaSignature && seenMedia.has(mediaSignature)) {
+      // Find the existing item and merge missing fields without duplicating
+      const existing = result.find((r) => {
+        const ev = String(r.videoUrl || '');
+        const ea = String(r.archiveDownloadUrl || (r as any).archiveChannelUrl || '');
+        return ev.includes(mediaSignature) || ea.includes(mediaSignature);
+      });
+      if (existing) {
+        if (!existing.ownerUid && item.ownerUid) existing.ownerUid = item.ownerUid;
+        if (!existing.uploaderId && item.uploaderId) existing.uploaderId = item.uploaderId;
+        if (!existing.uploaderEmail && item.uploaderEmail) existing.uploaderEmail = item.uploaderEmail;
+        if (!existing.archiveDownloadUrl && item.archiveDownloadUrl) existing.archiveDownloadUrl = item.archiveDownloadUrl;
+        if (item.videoUrl && item.videoUrl.startsWith('/uploads/')) existing.videoUrl = item.videoUrl;
+      }
+      continue;
+    }
+
+    seenId.add(item.id);
+    if (mediaSignature) seenMedia.add(mediaSignature);
+    result.push(item);
   }
   return result;
 }
@@ -150,6 +186,9 @@ export function App() {
       poster: '/uploads/poster_reel_1791983508338.jpg',
       username: '@sunil_mahto',
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      ownerUid: 'uHKqNIpC80UKRGhoXzAejfHMNTi2',
+      uploaderId: 'uHKqNIpC80UKRGhoXzAejfHMNTi2',
+      uploaderEmail: 'sunil.mahto@gmail.com',
       caption: 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
       category: 'music',
       hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
@@ -173,6 +212,9 @@ export function App() {
       poster: '/uploads/poster_reel_1788538428014_7buxs.jpg',
       username: '@Mehndi_Babu',
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      ownerUid: 'google-user-mehndibabu84',
+      uploaderId: 'google-user-mehndibabu84',
+      uploaderEmail: 'mehndibabu84@gmail.com',
       caption: 'My Uploaded Video 📱✨ #MehndiBabu #MSShortsVIP',
       category: 'dance',
       hashtags: ['#MehndiBabu', '#MSShortsVIP', '#Viral'],
@@ -190,15 +232,34 @@ export function App() {
     },
   ];
 
-  // Load initial reels from localStorage or cloud (purging ALL dummy/sample reels)
+  // Blacklist of deleted reel IDs to prevent resurrection across sessions
+  const [deletedReelIds, setDeletedReelIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('ms_shorts_deleted_reels');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ms_shorts_deleted_reels', JSON.stringify(Array.from(deletedReelIds)));
+    } catch {}
+  }, [deletedReelIds]);
+
+  // Load initial reels from localStorage or cloud (purging ALL dummy/sample reels and deleted reels)
   const [reels, setReels] = useState<VideoReel[]>(() => {
     try {
+      const savedDeleted = localStorage.getItem('ms_shorts_deleted_reels');
+      const deletedSet: Set<string> = savedDeleted ? new Set(JSON.parse(savedDeleted)) : new Set();
+
       const saved = localStorage.getItem('ms_shorts_vip_reels');
       if (saved) {
         const parsed: VideoReel[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const cleanUserReels = parsed
-            .filter((r) => !isDummyReel(r))
+            .filter((r) => !isDummyReel(r) && !deletedSet.has(r.id))
             .map((r) => {
               const archive = (r as any).archiveDownloadUrl || (r as any).archiveChannelUrl;
               return {
@@ -208,11 +269,11 @@ export function App() {
               };
             });
           if (cleanUserReels.length > 0) {
-            return deduplicateReels(cleanUserReels);
+            return deduplicateReels(cleanUserReels, deletedSet);
           }
         }
       }
-      return VERIFIED_INITIAL_REELS;
+      return VERIFIED_INITIAL_REELS.filter((r) => !deletedSet.has(r.id));
     } catch {
       return VERIFIED_INITIAL_REELS;
     }
@@ -414,18 +475,21 @@ export function App() {
         const cloudData = await fetchCloudReels();
         if (cloudData && Array.isArray(cloudData)) {
           const cleanCloud = cloudData
-            .filter((c) => !isDummyReel(c))
+            .filter((c) => !isDummyReel(c) && !deletedReelIds.has(c.id))
             .map((c) => {
               const archive = (c as any).archiveDownloadUrl || (c as any).archiveChannelUrl;
+              const fastUrl = c.videoUrl && c.videoUrl.startsWith('/uploads/')
+                ? c.videoUrl
+                : getCleanVideoUrl(c.videoUrl || archive);
               return {
                 ...c,
-                videoUrl: getCleanVideoUrl(archive || c.videoUrl),
+                videoUrl: fastUrl,
                 archiveDownloadUrl: archive || (c as any).archiveDownloadUrl,
               };
             });
           setReels((prev) => {
-            const cleanPrev = prev.filter((p) => !isDummyReel(p));
-            const merged = deduplicateReels([...cleanCloud, ...cleanPrev.filter((p) => !cleanCloud.some((c) => c.id === p.id))]);
+            const cleanPrev = prev.filter((p) => !isDummyReel(p) && !deletedReelIds.has(p.id));
+            const merged = deduplicateReels([...cleanPrev, ...cleanCloud], deletedReelIds);
             if (
               merged.length !== cleanPrev.length ||
               JSON.stringify(merged.map((r) => r.id)) !== JSON.stringify(cleanPrev.map((r) => r.id))
@@ -457,7 +521,7 @@ export function App() {
     const pollTimer = setInterval(syncCloudReels, 8000);
 
     return () => clearInterval(pollTimer);
-  }, []);
+  }, [deletedReelIds]);
 
   // Deep linking: Auto-scroll to specific reel if shared with ?v=reel_id or #reel_id
   useEffect(() => {
@@ -533,20 +597,22 @@ export function App() {
       unsubs = subscribeToFirestoreReels((remoteReels) => {
         if (remoteReels && remoteReels.length > 0) {
           const cleanRemote = remoteReels
-            .filter((r) => !isDummyReel(r))
+            .filter((r) => !isDummyReel(r) && !deletedReelIds.has(r.id))
             .map((r) => {
               const archive = (r as any).archiveDownloadUrl || (r as any).archiveChannelUrl;
+              const fastUrl = r.videoUrl && r.videoUrl.startsWith('/uploads/')
+                ? r.videoUrl
+                : getCleanVideoUrl(r.videoUrl || archive);
               return {
                 ...r,
-                videoUrl: getCleanVideoUrl(archive || r.videoUrl),
+                videoUrl: fastUrl,
                 archiveDownloadUrl: archive || (r as any).archiveDownloadUrl,
               };
             });
           if (cleanRemote.length > 0) {
             setReels((prev) => {
-              const cleanPrev = prev.filter((p) => !isDummyReel(p));
-              const userUploaded = cleanPrev.filter((p) => p.isUserUploaded && !cleanRemote.some((r) => r.id === p.id));
-              return deduplicateReels([...cleanRemote, ...userUploaded]);
+              const cleanPrev = prev.filter((p) => !isDummyReel(p) && !deletedReelIds.has(p.id));
+              return deduplicateReels([...cleanPrev, ...cleanRemote], deletedReelIds);
             });
           }
         }
@@ -563,7 +629,7 @@ export function App() {
         }
       }
     };
-  }, []);
+  }, [deletedReelIds]);
 
   // Save Notifications to localStorage
   useEffect(() => {
@@ -600,11 +666,8 @@ export function App() {
     if (followersCount < 2000) {
       const alertMsg = `❌ Requirement Not Met! You need at least 2,000 Followers to start a Live Stream (Current Followers: ${(followersCount ?? 0).toLocaleString()}).`;
       setGoLiveAlert(alertMsg);
-      try {
-        alert(alertMsg);
-      } catch (e) {
-        // Browser alert fallback
-      }
+      setShareToast('Live Stream requires at least 2,000 followers');
+      setTimeout(() => setShareToast(null), 3000);
     } else {
       setActiveTab('live');
     }
@@ -623,20 +686,26 @@ export function App() {
     if (containerRef.current) {
       containerRef.current.scrollTop = 0;
     }
+    const initialSafe = VERIFIED_INITIAL_REELS.filter((r) => !deletedReelIds.has(r.id));
     try {
       const saved = localStorage.getItem('ms_shorts_vip_reels');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setReels(parsed);
+          const clean = parsed.filter((r) => !isDummyReel(r) && !deletedReelIds.has(r.id));
+          if (clean.length > 0) {
+            setReels(deduplicateReels(clean, deletedReelIds));
+          } else {
+            setReels(initialSafe);
+          }
         } else {
-          setReels(INITIAL_REELS);
+          setReels(initialSafe);
         }
       } else {
-        setReels(INITIAL_REELS);
+        setReels(initialSafe);
       }
     } catch (e) {
-      setReels(INITIAL_REELS);
+      setReels(initialSafe);
     }
     setTimeout(() => {
       const vid = document.querySelector('video');
@@ -651,10 +720,10 @@ export function App() {
     }, 100);
   };
 
-  // Ranked & Filtered Video Reels based on category selection & real-time AI watch-time scoring
+  // Ranked & Filtered Video Reels based on category selection (Kept stable during active playback to prevent player resets)
   const displayReels = useMemo(() => {
     return rankReelsForFeed(reels, activeCategoryFilter, tasteProfile);
-  }, [reels, activeCategoryFilter, tasteProfile]);
+  }, [reels, activeCategoryFilter]);
 
   // Active watch time update handler (AI Recommendation Algorithm)
   const handleWatchTimeUpdate = (reel: VideoReel, seconds: number, isLooped: boolean) => {
@@ -855,7 +924,7 @@ export function App() {
     }, 150);
   };
 
-  // Post new gallery video directly to central cloud storage & public feed
+  // Post new gallery video directly to central cloud storage & public feed (Single Addition Guarantee)
   const handlePostLive = async (
     videoUrl: string,
     caption: string,
@@ -870,118 +939,174 @@ export function App() {
     }
 
     const timestamp = Date.now();
-    const newReelId = `user-reel-${timestamp}-${Math.random().toString(36).substring(2, 7)}`;
-    
-    // Switch to Home feed immediately and scroll to top for instant 0s playback
-    setActiveTab('home');
-    setActiveReelIdx(0);
-    if (containerRef.current) {
-      containerRef.current.scrollTop = 0;
-    }
-
+    const permanentReelId = `user-reel_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
     const currentUsername = authUser.username;
     const currentAvatar = authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
     const currentUid = authUser.uid;
 
-    const optimisticReel: VideoReel = {
-      id: newReelId,
-      videoUrl: videoUrl,
-      poster: instantThumbnail || currentAvatar,
-      username: currentUsername,
-      avatar: currentAvatar,
-      uploaderId: currentUid,
-      caption,
-      category: category || 'music',
-      hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
-      songName: songName || `Original Audio - ${currentUsername}`,
-      likes: 1,
-      commentsCount: 0,
-      sharesCount: 0,
-      isLiked: true,
-      isFollowing: true,
-      isUserUploaded: true,
-      isVip: authUser?.isVip || false,
-      vipLevel: authUser?.vipLevel || 0,
-      storageProvider: 'akai.in',
-      createdAt: 'Just now',
-    };
-
-    // Render immediately in feed so user sees real playback in 0s
-    setReels((prev) => [optimisticReel, ...prev.filter((r) => r.id !== newReelId)]);
     setUploadProgress({ isUploading: true, percentage: 15 });
 
     if (file) {
-      // Instantly cache video in device's IndexedDB for guaranteed zero-failure local playback
-      saveVideoBlob(newReelId, file).catch(() => {});
+      // Save local indexedDB buffer
+      saveVideoBlob(permanentReelId, file).catch(() => {});
 
-      // Optimize (720p / 2.2 Mbps) and upload to Internet Archive S3 with real-time XMLHttpRequest progress
-      uploadToArchiveOrgS3(file, {
-        title: caption || 'MS Shorts VIP Reel',
-        caption,
-        username: currentUsername,
-        onProgress: (prog) => {
-          setUploadProgress({
-            isUploading: true,
-            percentage: prog.percentage,
-          });
-        },
-      })
-        .then((uploadResult) => {
-          const directArchiveUrl = uploadResult.archiveDownloadUrl;
-          const localUrl = uploadResult.localStreamUrl;
+      try {
+        const uploadResult = await uploadToArchiveOrgS3(file, {
+          title: caption || 'MS Shorts VIP Reel',
+          caption,
+          username: currentUsername,
+          onProgress: (prog) => {
+            setUploadProgress({
+              isUploading: true,
+              percentage: prog.percentage,
+            });
+          },
+        });
 
-          const updatedReel: VideoReel = {
-            ...optimisticReel,
-            videoUrl: localUrl || directArchiveUrl || videoUrl,
-            archiveChannelUrl: directArchiveUrl,
+        const directArchiveUrl = uploadResult.archiveDownloadUrl;
+        const localUrl = uploadResult.localStreamUrl;
+        const finalStreamUrl = localUrl || directArchiveUrl || videoUrl;
+
+        const newReel: VideoReel = {
+          id: permanentReelId,
+          videoUrl: finalStreamUrl,
+          archiveDownloadUrl: directArchiveUrl,
+          archiveChannelUrl: directArchiveUrl,
+          poster: instantThumbnail || currentAvatar,
+          username: currentUsername,
+          avatar: currentAvatar,
+          ownerUid: currentUid,
+          uploaderId: currentUid,
+          uploaderEmail: authUser.email,
+          caption: caption || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+          category: category || 'music',
+          hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
+          songName: songName || `Original Audio - ${currentUsername}`,
+          likes: 1,
+          commentsCount: 0,
+          sharesCount: 0,
+          isLiked: true,
+          isFollowing: true,
+          isUserUploaded: true,
+          isVip: authUser?.isVip || false,
+          vipLevel: authUser?.vipLevel || 0,
+          storageProvider: 'archive.org',
+          createdAt: 'Just now',
+        };
+
+        // Add to feed EXACTLY ONCE
+        setReels((prev) => deduplicateReels([newReel, ...prev], deletedReelIds));
+        await publishReelToCloud(newReel);
+        await saveReelToFirestore(newReel);
+
+        setUploadProgress({ isUploading: true, percentage: 100 });
+        setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 800);
+
+        // Switch to Home feed immediately and scroll to top for instant playback
+        setActiveTab('home');
+        setActiveReelIdx(0);
+        if (containerRef.current) {
+          containerRef.current.scrollTop = 0;
+        }
+
+        addNotification(
+          'archive_sync',
+          currentUsername,
+          currentAvatar,
+          '⚡ Video uploaded & saved permanently to Internet Archive S3!',
+          permanentReelId
+        );
+      } catch (uploadErr) {
+        console.warn('Direct upload notice, falling back to server pipeline:', uploadErr);
+        try {
+          const res = await uploadToFreeCloudPipeline(
+            file,
+            { caption, username: currentUsername, songName: songName || `Original Audio - ${currentUsername}` },
+            (pct) => setUploadProgress({ isUploading: true, percentage: pct })
+          );
+
+          const finalStreamUrl = res.playbackUrl || res.videoUrl || videoUrl;
+          const newReel: VideoReel = {
+            id: permanentReelId,
+            videoUrl: finalStreamUrl,
+            archiveDownloadUrl: res.archiveDownloadUrl || '',
+            archiveChannelUrl: res.archiveDownloadUrl || '',
+            poster: instantThumbnail || currentAvatar,
+            username: currentUsername,
+            avatar: currentAvatar,
+            ownerUid: currentUid,
+            uploaderId: currentUid,
+            uploaderEmail: authUser.email,
+            caption: caption || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+            category: category || 'music',
+            hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
+            songName: songName || `Original Audio - ${currentUsername}`,
+            likes: 1,
+            commentsCount: 0,
+            sharesCount: 0,
+            isLiked: true,
+            isFollowing: true,
+            isUserUploaded: true,
+            isVip: authUser?.isVip || false,
+            vipLevel: authUser?.vipLevel || 0,
             storageProvider: 'archive.org',
-            poster: optimisticReel.poster,
+            createdAt: 'Just now',
           };
 
-          setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
-          publishReelToCloud(updatedReel);
-          saveReelToFirestore(updatedReel);
-          setUploadProgress({ isUploading: true, percentage: 100 });
-          setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
+          setReels((prev) => deduplicateReels([newReel, ...prev], deletedReelIds));
+          await publishReelToCloud(newReel);
+          await saveReelToFirestore(newReel);
 
-          addNotification(
-            'archive_sync',
-            currentUsername,
-            currentAvatar,
-            '⚡ Video optimized & saved permanently to Internet Archive S3!',
-            newReelId
-          );
-        })
-        .catch((err) => {
-          console.warn('Archive upload fallback to local cloud pipeline:', err);
-          uploadToFreeCloudPipeline(
-            file,
-            { caption, username: currentUsername, songName: optimisticReel.songName },
-            (pct) => setUploadProgress({ isUploading: true, percentage: pct })
-          )
-            .then((res) => {
-              const updatedReel: VideoReel = {
-                ...optimisticReel,
-                videoUrl: res.playbackUrl || res.videoUrl || videoUrl,
-                archiveChannelUrl: res.archiveDownloadUrl || '',
-                storageProvider: 'archive.org',
-              };
-              setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
-              publishReelToCloud(updatedReel);
-              saveReelToFirestore(updatedReel);
-              setUploadProgress({ isUploading: true, percentage: 100 });
-              setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
-            })
-            .catch(() => {
-              publishReelToCloud(optimisticReel);
-              setUploadProgress({ isUploading: false, percentage: 0 });
-            });
-        });
+          setUploadProgress({ isUploading: true, percentage: 100 });
+          setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 800);
+
+          setActiveTab('home');
+          setActiveReelIdx(0);
+          if (containerRef.current) containerRef.current.scrollTop = 0;
+        } catch (pipeErr) {
+          setUploadProgress({ isUploading: false, percentage: 0 });
+          setShareToast('वीडियो अपलोड करने में समस्या आई। कृपया पुनः प्रयास करें।');
+          setTimeout(() => setShareToast(null), 4000);
+        }
+      }
     } else {
-      publishReelToCloud(optimisticReel);
-      saveReelToFirestore(optimisticReel);
+      // Direct URL
+      const cleanUrl = getCleanVideoUrl(videoUrl);
+      const newReel: VideoReel = {
+        id: permanentReelId,
+        videoUrl: cleanUrl,
+        poster: instantThumbnail || currentAvatar,
+        username: currentUsername,
+        avatar: currentAvatar,
+        ownerUid: currentUid,
+        uploaderId: currentUid,
+        uploaderEmail: authUser.email,
+        caption: caption || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+        category: category || 'music',
+        hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
+        songName: songName || `Original Audio - ${currentUsername}`,
+        likes: 1,
+        commentsCount: 0,
+        sharesCount: 0,
+        isLiked: true,
+        isFollowing: true,
+        isUserUploaded: true,
+        isVip: authUser?.isVip || false,
+        vipLevel: authUser?.vipLevel || 0,
+        storageProvider: 'archive.org',
+        createdAt: 'Just now',
+      };
+
+      setReels((prev) => deduplicateReels([newReel, ...prev], deletedReelIds));
+      await publishReelToCloud(newReel);
+      await saveReelToFirestore(newReel);
+
       setUploadProgress({ isUploading: true, percentage: 100 });
-      setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 800);
+      setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 500);
+
+      setActiveTab('home');
+      setActiveReelIdx(0);
+      if (containerRef.current) containerRef.current.scrollTop = 0;
     }
   };
 
@@ -1001,7 +1126,7 @@ export function App() {
     );
   };
 
-  // Post camera recorded video directly to central cloud storage & public feed
+  // Post camera recorded video directly to central cloud storage & public feed (Single Addition Guarantee)
   const handlePostRecordedVideo = async (
     videoUrl: string,
     caption: string,
@@ -1016,95 +1141,206 @@ export function App() {
     }
 
     const timestamp = Date.now();
-    const newReelId = `cam-reel-${timestamp}-${Math.random().toString(36).substring(2, 7)}`;
-    
-    // Switch to Home feed immediately and scroll to top for instant 0s playback
-    setActiveTab('home');
-    setActiveReelIdx(0);
-    if (containerRef.current) {
-      containerRef.current.scrollTop = 0;
-    }
-
+    const permanentReelId = `cam-reel_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
     const currentUsername = authUser.username;
     const currentAvatar = authUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
     const currentUid = authUser.uid;
 
-    const optimisticReel: VideoReel = {
-      id: newReelId,
-      videoUrl: videoUrl,
-      poster: instantThumbnail || currentAvatar,
-      username: currentUsername,
-      avatar: currentAvatar,
-      uploaderId: currentUid,
-      caption,
-      hashtags: ['#VIPCamera', '#MSShortsVIP', '#Viral'],
-      songName,
-      filterApplied: filterName,
-      likes: 1,
-      commentsCount: 0,
-      sharesCount: 0,
-      isLiked: true,
-      isFollowing: true,
-      isUserUploaded: true,
-      isVip: authUser?.isVip || false,
-      vipLevel: authUser?.vipLevel || 0,
-      storageProvider: 'archive.org',
-      createdAt: 'Just now',
-    };
-
-    // Render immediately in feed so user sees real playback in 0s
-    setReels((prev) => [optimisticReel, ...prev.filter((r) => r.id !== newReelId)]);
     setUploadProgress({ isUploading: true, percentage: 15 });
 
     if (blob) {
-      uploadToArchiveOrgS3(blob, {
-        title: caption || 'MS Shorts VIP Camera Reel',
-        caption,
-        username: currentUsername,
-        onProgress: (prog) => {
-          setUploadProgress({
-            isUploading: true,
-            percentage: prog.percentage,
-          });
-        },
-      })
-        .then((uploadResult) => {
-          const directArchiveUrl = uploadResult.archiveDownloadUrl;
-          const localUrl = uploadResult.localStreamUrl;
-
-          const updatedReel: VideoReel = {
-            ...optimisticReel,
-            videoUrl: localUrl || directArchiveUrl || videoUrl,
-            poster: optimisticReel.poster,
-            archiveChannelUrl: directArchiveUrl,
-            storageProvider: 'archive.org',
-          };
-          setReels((prev) => prev.map((r) => (r.id === newReelId ? updatedReel : r)));
-          publishReelToCloud(updatedReel);
-          saveReelToFirestore(updatedReel);
-          setUploadProgress({ isUploading: true, percentage: 100 });
-          setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 1000);
-        })
-        .catch(() => {
-          publishReelToCloud(optimisticReel);
-          saveReelToFirestore(optimisticReel);
-          setUploadProgress({ isUploading: false, percentage: 0 });
+      try {
+        const uploadResult = await uploadToArchiveOrgS3(blob, {
+          title: caption || 'MS Shorts VIP Camera Reel',
+          caption,
+          username: currentUsername,
+          onProgress: (prog) => {
+            setUploadProgress({
+              isUploading: true,
+              percentage: prog.percentage,
+            });
+          },
         });
+
+        const directArchiveUrl = uploadResult.archiveDownloadUrl;
+        const localUrl = uploadResult.localStreamUrl;
+        const finalStreamUrl = localUrl || directArchiveUrl || videoUrl;
+
+        const newReel: VideoReel = {
+          id: permanentReelId,
+          videoUrl: finalStreamUrl,
+          poster: instantThumbnail || currentAvatar,
+          archiveDownloadUrl: directArchiveUrl,
+          archiveChannelUrl: directArchiveUrl,
+          username: currentUsername,
+          avatar: currentAvatar,
+          ownerUid: currentUid,
+          uploaderId: currentUid,
+          uploaderEmail: authUser.email,
+          caption: caption || 'Camera recorded reel! 🎬✨ #MSShortsVIP',
+          hashtags: ['#VIPCamera', '#MSShortsVIP', '#Viral'],
+          songName,
+          filterApplied: filterName,
+          likes: 1,
+          commentsCount: 0,
+          sharesCount: 0,
+          isLiked: true,
+          isFollowing: true,
+          isUserUploaded: true,
+          isVip: authUser?.isVip || false,
+          vipLevel: authUser?.vipLevel || 0,
+          storageProvider: 'archive.org',
+          createdAt: 'Just now',
+        };
+
+        setReels((prev) => deduplicateReels([newReel, ...prev], deletedReelIds));
+        await publishReelToCloud(newReel);
+        await saveReelToFirestore(newReel);
+
+        setUploadProgress({ isUploading: true, percentage: 100 });
+        setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 800);
+
+        setActiveTab('home');
+        setActiveReelIdx(0);
+        if (containerRef.current) containerRef.current.scrollTop = 0;
+      } catch (err) {
+        console.warn('Camera upload notice, saving directly:', err);
+        const cleanUrl = getCleanVideoUrl(videoUrl);
+        const newReel: VideoReel = {
+          id: permanentReelId,
+          videoUrl: cleanUrl,
+          poster: instantThumbnail || currentAvatar,
+          username: currentUsername,
+          avatar: currentAvatar,
+          ownerUid: currentUid,
+          uploaderId: currentUid,
+          uploaderEmail: authUser.email,
+          caption,
+          hashtags: ['#VIPCamera', '#MSShortsVIP', '#Viral'],
+          songName,
+          filterApplied: filterName,
+          likes: 1,
+          commentsCount: 0,
+          sharesCount: 0,
+          isLiked: true,
+          isFollowing: true,
+          isUserUploaded: true,
+          isVip: authUser?.isVip || false,
+          vipLevel: authUser?.vipLevel || 0,
+          storageProvider: 'archive.org',
+          createdAt: 'Just now',
+        };
+
+        setReels((prev) => deduplicateReels([newReel, ...prev], deletedReelIds));
+        await publishReelToCloud(newReel);
+        await saveReelToFirestore(newReel);
+        setUploadProgress({ isUploading: false, percentage: 0 });
+      }
     } else {
-      publishReelToCloud(optimisticReel);
-      saveReelToFirestore(optimisticReel);
+      const cleanUrl = getCleanVideoUrl(videoUrl);
+      const newReel: VideoReel = {
+        id: permanentReelId,
+        videoUrl: cleanUrl,
+        poster: instantThumbnail || currentAvatar,
+        username: currentUsername,
+        avatar: currentAvatar,
+        ownerUid: currentUid,
+        uploaderId: currentUid,
+        uploaderEmail: authUser.email,
+        caption,
+        hashtags: ['#VIPCamera', '#MSShortsVIP', '#Viral'],
+        songName,
+        filterApplied: filterName,
+        likes: 1,
+        commentsCount: 0,
+        sharesCount: 0,
+        isLiked: true,
+        isFollowing: true,
+        isUserUploaded: true,
+        isVip: authUser?.isVip || false,
+        vipLevel: authUser?.vipLevel || 0,
+        storageProvider: 'archive.org',
+        createdAt: 'Just now',
+      };
+
+      setReels((prev) => deduplicateReels([newReel, ...prev], deletedReelIds));
+      await publishReelToCloud(newReel);
+      await saveReelToFirestore(newReel);
       setUploadProgress({ isUploading: true, percentage: 100 });
-      setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 800);
+      setTimeout(() => setUploadProgress({ isUploading: false, percentage: 0 }), 500);
+
+      setActiveTab('home');
+      setActiveReelIdx(0);
+      if (containerRef.current) containerRef.current.scrollTop = 0;
     }
   };
 
-  // Delete Reel (From user's profile and public cloud storage)
+  // Delete Reel with secure ownership authorization and permanent blacklist persistence
   const handleDeleteReel = async (reelId: string) => {
+    const targetReel = reels.find((r) => r.id === reelId);
+    if (!targetReel) return;
+
+    if (!canUserDeleteReel(targetReel, authUser)) {
+      setShareToast('सुरक्षा त्रुटि: आप केवल अपना खुद का वीडियो डिलीट कर सकते हैं');
+      setTimeout(() => setShareToast(null), 3500);
+      addNotification(
+        'archive_sync',
+        'Security Check',
+        authUser?.photoURL || DEFAULT_GOOGLE_USER.photoURL,
+        'सुरक्षा त्रुटि: आप केवल अपना खुद का वीडियो डिलीट कर सकते हैं। प्रशासक सभी वीडियो डिलीट कर सकते हैं।'
+      );
+      return;
+    }
+
+    // 1. Add to permanent blacklist in state and localStorage
+    setDeletedReelIds((prev) => {
+      const next = new Set(prev);
+      next.add(reelId);
+      try {
+        localStorage.setItem('ms_shorts_deleted_reels', JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+
+    // 2. Remove immediately from local state
     setReels((prev) => prev.filter((r) => r.id !== reelId));
+
+    // 3. Update localStorage reels cache
     try {
-      await deleteReelFromCloud(reelId);
+      const saved = localStorage.getItem('ms_shorts_vip_reels');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const updated = parsed.filter((r: any) => r.id !== reelId);
+          localStorage.setItem('ms_shorts_vip_reels', JSON.stringify(updated));
+        }
+      }
+    } catch {}
+
+    setShareToast('वीडियो सफलतापूर्वक हटा दिया गया (Deleted)');
+    setTimeout(() => setShareToast(null), 3000);
+    addNotification(
+      'archive_sync',
+      'Video Deleted',
+      authUser?.photoURL || DEFAULT_GOOGLE_USER.photoURL,
+      `🗑️ Video "${(targetReel.caption || 'Reel').substring(0, 30)}..." deleted successfully.`
+    );
+
+    // 4. Delete from server database & disk
+    try {
+      const res = await deleteReelFromCloud(reelId, authUser);
+      if (!res.success) {
+        console.warn('Delete cloud reel notice:', res.error);
+      }
     } catch (e) {
       console.warn('Delete cloud reel error:', e);
+    }
+
+    // 5. Delete from Firestore
+    try {
+      await deleteReelFromFirestore(reelId, authUser?.uid, authUser?.isAdmin);
+    } catch (e) {
+      console.warn('Delete firestore reel error:', e);
     }
   };
 
@@ -1615,10 +1851,11 @@ export function App() {
                   const strategy = calculatePreloadStrategy(activeReelIdx, idx, scrollDirection);
                   return (
                     <ReelCard
-                      key={`${reel.id}-${idx}`}
+                      key={reel.id}
                       reel={reel}
                       index={idx}
                       isActive={idx === activeReelIdx && activeTab === 'home'}
+                      authUser={authUser}
                       preloadDistance={dist}
                       preloadMode={strategy.preloadAttribute}
                       lifecycleState={strategy.state}
@@ -1636,6 +1873,7 @@ export function App() {
                       }}
                       onFollowToggle={handleFollowToggle}
                       onWatchTimeUpdate={handleWatchTimeUpdate}
+                      onDeleteReel={handleDeleteReel}
                     />
                   );
                 })
@@ -1680,15 +1918,12 @@ export function App() {
               userReels={reels.filter((r) => {
                 if (!authUser) return false;
                 if (isDummyReel(r)) return false;
-                const isMehndi =
-                  (authUser.email && authUser.email.toLowerCase().includes('mehndi')) ||
-                  (authUser.username && authUser.username.toLowerCase().includes('mehndi'));
-                if (isMehndi && (r.isUserUploaded || String(r.id).startsWith('user-') || String(r.id).startsWith('cam-') || (r.username && r.username.toLowerCase().includes('mehndi')))) {
-                  return true;
-                }
-                if (r.uploaderId && r.uploaderId === authUser.uid) return true;
+                const ownerUid = r.ownerUid || r.uploaderId;
+                if (ownerUid && ownerUid === authUser.uid) return true;
                 if (r.uploaderEmail && authUser.email && r.uploaderEmail.toLowerCase() === authUser.email.toLowerCase()) return true;
-                if (r.username && authUser.username && r.username.toLowerCase() === authUser.username.toLowerCase()) return true;
+                const reelUsername = (r.username || '').toLowerCase().replace('@', '').trim();
+                const currentUsername = (authUser.username || '').toLowerCase().replace('@', '').trim();
+                if (reelUsername && currentUsername && reelUsername === currentUsername) return true;
                 return false;
               })}
               likedReels={reels.filter((r) => r.isLiked)}

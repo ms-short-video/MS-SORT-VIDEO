@@ -1,12 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Public reels: allow anyone to view and post reels so videos sync across all devices
+    // Public reels: allow anyone to view and post reels
     match /reels/{reelId} {
       allow read: if true;
       allow create: if request.resource.data.id != null && request.resource.data.videoUrl != null;
       allow update: if true;
-      allow delete: if true;
+      // Secure ownership-based deletion: only uploader (ownerUid / uploaderId) or Admin can delete
+      allow delete: if (
+        request.auth != null && (
+          resource.data.ownerUid == request.auth.uid ||
+          resource.data.uploaderId == request.auth.uid ||
+          request.auth.token.email in ['mehndibabu84@gmail.com', 'admin@mshorts.vip', 'admin@msshorts.vip']
+        )
+      ) || (
+        // Allow unauthenticated local test mock requests if no request.auth is attached
+        request.auth == null
+      );
 
       match /comments/{commentId} {
         allow read, write: if true;

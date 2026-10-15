@@ -1,5 +1,5 @@
 // MS Shorts VIP Service Worker
-const CACHE_NAME = 'ms-shorts-vip-v1';
+const CACHE_NAME = 'ms-shorts-vip-v4';
 const OFFLINE_URL = '/';
 
 // Pre-cache essential app shell assets on install
@@ -22,7 +22,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// 2. Activate Event: Clean up old caches & claim clients immediately
+// 2. Activate Event: Clean up ALL old caches & claim clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -53,16 +53,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For API endpoints or dynamic uploads, try network directly
-  if (request.url.includes('/api/') || request.url.includes('/uploads/')) {
-    event.respondWith(
-      fetch(request).catch(() => {
-        return new Response(
-          JSON.stringify({ error: 'Network unavailable. Running in offline mode.' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
-        );
-      })
-    );
+  const url = request.url;
+
+  // NEVER intercept Vite dev dependencies, source files, or versioned chunks to prevent duplicate React runtime instances
+  if (
+    url.includes('/node_modules/') ||
+    url.includes('/@') ||
+    url.includes('/src/') ||
+    url.includes('?v=') ||
+    url.includes('chunk-') ||
+    url.includes('/vite') ||
+    url.includes('/__vite') ||
+    url.includes('/api/') ||
+    url.includes('/uploads/')
+  ) {
     return;
   }
 

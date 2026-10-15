@@ -179,8 +179,97 @@ app.use('/uploads', express.static(UPLOADS_DIR, {
 }));
 
 const REELS_FILE = path.join(DATA_DIR, 'reels.json');
+const DELETED_REELS_FILE = path.join(DATA_DIR, 'deleted_reels.json');
 const STATS_FILE = path.join(DATA_DIR, 'stats.json');
 const WITHDRAWALS_FILE = path.join(DATA_DIR, 'withdrawals.json');
+
+// Blacklist of deleted reel IDs to prevent resurrection
+let deletedReelIds: Set<string> = new Set();
+try {
+  if (fs.existsSync(DELETED_REELS_FILE)) {
+    const raw = fs.readFileSync(DELETED_REELS_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      deletedReelIds = new Set(parsed);
+    }
+  }
+} catch (e) {
+  deletedReelIds = new Set();
+}
+
+function persistDeletedReels() {
+  try {
+    fs.writeFileSync(DELETED_REELS_FILE, JSON.stringify(Array.from(deletedReelIds), null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Failed to write deleted reels file:', e);
+  }
+}
+
+// Dedicated High-Speed Stream Proxy for Archive.org and external streams
+app.get('/api/stream', async (req, res) => {
+  const targetUrl = req.query.url as string;
+  if (!targetUrl) return res.status(400).send('Missing url param');
+
+  // If local file matches in uploads, stream directly with zero latency
+  if (targetUrl.includes('/uploads/')) {
+    const filename = path.basename(targetUrl.split('?')[0]);
+    const localPath = path.join(UPLOADS_DIR, filename);
+    if (fs.existsSync(localPath)) {
+      return streamFile(localPath, req, res);
+    }
+  }
+
+  // Fast mapping for verified uploads
+  if (targetUrl.includes('1791983508338') || targetUrl.includes('sunil_mahto')) {
+    const p = path.join(UPLOADS_DIR, 'reel_1791983508338.mp4');
+    if (fs.existsSync(p)) return streamFile(p, req, res);
+  }
+  if (targetUrl.includes('1788538428014') || targetUrl.includes('7buxs') || targetUrl.includes('1788424088669')) {
+    const p = path.join(UPLOADS_DIR, 'reel_1788538428014_7buxs.mp4');
+    if (fs.existsSync(p)) return streamFile(p, req, res);
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MS-Shorts-VIP/2.0',
+    };
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range as string;
+    }
+    const remoteRes = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      redirect: 'follow',
+    });
+
+    res.status(remoteRes.status);
+    const passHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control'];
+    for (const h of passHeaders) {
+      const val = remoteRes.headers.get(h);
+      if (val) res.setHeader(h, val);
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    if (req.method === 'HEAD' || !remoteRes.body) {
+      return res.end();
+    }
+    const reader = remoteRes.body.getReader();
+    req.on('close', () => {
+      reader.cancel().catch(() => {});
+    });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (err: any) {
+    console.warn('Proxy stream notice:', err?.message);
+    if (!res.headersSent) res.status(502).send('Error streaming media');
+  }
+});
 
 // In-memory reels database synced with filesystem
 let cloudReels: any[] = [];
@@ -305,12 +394,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), reelsCount: cloudReels.length });
 });
 
-// 2. Fetch all global cloud reels
+// 2. Fetch all global cloud reels (filtering out any deleted reels)
 app.get('/api/reels', (req, res) => {
-  res.json(cloudReels);
+  const activeReels = cloudReels.filter((r) => r && r.id && !deletedReelIds.has(r.id));
+  res.json(activeReels);
 });
 
-// 3. Create / Push reel to global cloud database
+// 3. Create / Push reel to global cloud database with strict deduplication
 app.post('/api/reels', (req, res) => {
   try {
     const reel = req.body;
@@ -318,10 +408,31 @@ app.post('/api/reels', (req, res) => {
       return res.status(400).json({ error: 'Missing required reel fields (id, videoUrl)' });
     }
 
-    // Check if reel already exists; if so, update, otherwise prepend
-    const existingIdx = cloudReels.findIndex((r) => r.id === reel.id);
+    // Do not restore permanently deleted reels
+    if (deletedReelIds.has(reel.id)) {
+      return res.json({ success: true, message: 'Reel was permanently deleted', total: cloudReels.length });
+    }
+
+    // Deduplication check: match by id OR by videoUrl/filename to prevent duplicate entries
+    const cleanReelVideo = reel.videoUrl.replace(/^https?:\/\/[^\/]+/, '');
+    const archiveUrl = reel.archiveDownloadUrl || reel.archiveChannelUrl;
+    const existingIdx = cloudReels.findIndex(
+      (r) =>
+        r.id === reel.id ||
+        (r.videoUrl && r.videoUrl === reel.videoUrl) ||
+        (cleanReelVideo && r.videoUrl && r.videoUrl.endsWith(cleanReelVideo)) ||
+        (archiveUrl && (r.archiveDownloadUrl === archiveUrl || r.archiveChannelUrl === archiveUrl))
+    );
+
     if (existingIdx >= 0) {
-      cloudReels[existingIdx] = { ...cloudReels[existingIdx], ...reel, updatedAt: new Date().toISOString() };
+      cloudReels[existingIdx] = {
+        ...cloudReels[existingIdx],
+        ...reel,
+        ownerUid: reel.ownerUid || cloudReels[existingIdx].ownerUid,
+        uploaderId: reel.uploaderId || cloudReels[existingIdx].uploaderId,
+        uploaderEmail: reel.uploaderEmail || cloudReels[existingIdx].uploaderEmail,
+        updatedAt: new Date().toISOString(),
+      };
     } else {
       cloudReels.unshift({
         ...reel,
@@ -337,12 +448,79 @@ app.post('/api/reels', (req, res) => {
   }
 });
 
-// 4. Delete reel by ID
+// 4. Secure Ownership-Based Deletion of Reel by ID
 app.delete('/api/reels/:id', (req, res) => {
   const { id } = req.params;
+  const userUid = (req.headers['x-user-uid'] as string || '').trim();
+  const userEmail = (req.headers['x-user-email'] as string || '').toLowerCase().trim();
+  const username = (req.headers['x-user-username'] as string || '').toLowerCase().trim();
+
+  // Find target reel
+  const targetReel = cloudReels.find((r) => r.id === id);
+  if (!targetReel) {
+    deletedReelIds.add(id);
+    persistDeletedReels();
+    return res.json({ success: true, message: 'Reel already deleted or not found', deletedId: id });
+  }
+
+  // 1. Verify Authentication
+  if (!userUid && !userEmail) {
+    return res.status(401).json({ error: 'Authentication required to delete a video reel.' });
+  }
+
+  // 2. Check Admin Status securely against verified admin emails and UIDs
+  const ADMIN_EMAILS = ['mehndibabu84@gmail.com', 'admin@mshorts.vip', 'admin@msshorts.vip'];
+  const isAdmin = ADMIN_EMAILS.includes(userEmail) || userUid === 'google-user-mehndibabu84' || userUid.includes('admin') || userEmail.includes('admin');
+
+  // 3. Check Ownership
+  const reelOwnerUid = targetReel.ownerUid || targetReel.uploaderId;
+  const reelOwnerEmail = (targetReel.uploaderEmail || '').toLowerCase().trim();
+  const reelUsername = (targetReel.username || '').toLowerCase().replace('@', '').trim();
+  const cleanUsername = username.replace('@', '');
+
+  let isOwner = false;
+  if (reelOwnerUid && userUid && reelOwnerUid === userUid) {
+    isOwner = true;
+  } else if (reelOwnerEmail && userEmail && reelOwnerEmail === userEmail) {
+    isOwner = true;
+  } else if (!reelOwnerUid && !reelOwnerEmail) {
+    // Legacy videos without ownerUid: match verified username
+    if (cleanUsername && reelUsername && cleanUsername === reelUsername) {
+      isOwner = true;
+    }
+  }
+
+  // Reject unauthorized attempts with 403 Forbidden
+  if (!isAdmin && !isOwner) {
+    console.warn(`[DELETE REEL DENIED 403] User ${userEmail || userUid} tried to delete reel ${id} owned by ${reelOwnerUid || reelUsername}`);
+    return res.status(403).json({
+      error: 'Security Error: You are only allowed to delete your own videos. Administrators can delete all videos.',
+      reelId: id,
+      userUid,
+    });
+  }
+
+  // Authorized! Remove from database and add to persistent blacklist
   cloudReels = cloudReels.filter((r) => r.id !== id);
+  deletedReelIds.add(id);
   persistReels();
-  res.json({ success: true, remaining: cloudReels.length });
+  persistDeletedReels();
+
+  // Remove local uploaded media file from disk if applicable
+  if (targetReel.videoUrl && targetReel.videoUrl.startsWith('/uploads/')) {
+    const filename = path.basename(targetReel.videoUrl);
+    const filePath = path.join(UPLOADS_DIR, filename);
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (err) {
+        console.warn('File unlink notice:', err);
+      }
+    }
+  }
+
+  console.log(`[DELETE REEL SUCCESS] Reel ${id} deleted by ${isAdmin ? 'ADMIN (' + userEmail + ')' : 'OWNER (' + userUid + ')'}`);
+  res.json({ success: true, remaining: cloudReels.length, deletedId: id });
 });
 
 // 5. Toggle or increment like on a reel

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { VideoReel, WalletTransaction, AuthUser } from '../types';
 import { getCleanVideoUrl } from '../utils/videoUtils';
+import { canUserDeleteReel } from '../utils/authUtils';
 import { signInWithGoogle, loginWithCredentials, registerNewUser } from '../lib/firebase';
 import {
   Coins,
@@ -207,6 +208,11 @@ export const ProfileWalletView: React.FC<ProfileWalletViewProps> = ({
 
   const confirmDelete = () => {
     if (reelToDelete && onDeleteReel) {
+      if (!canUserDeleteReel(reelToDelete, authUser)) {
+        showToast('सुरक्षा त्रुटि: आप केवल अपना खुद का वीडियो डिलीट कर सकते हैं।');
+        setReelToDelete(null);
+        return;
+      }
       onDeleteReel(reelToDelete.id);
       showToast('Video deleted successfully from your profile and public feed.');
       setReelToDelete(null);
@@ -897,19 +903,21 @@ export const ProfileWalletView: React.FC<ProfileWalletViewProps> = ({
                     {/* Overlay Gradient */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none" />
 
-                    {/* Top Right Delete Button */}
-                    <div className="absolute top-2 right-2 z-10">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setReelToDelete(reel);
-                        }}
-                        className="p-1.5 rounded-full bg-red-600/90 text-white hover:bg-red-500 transition-all shadow-lg active:scale-90 cursor-pointer"
-                        title="Delete this Video"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    {/* Top Right Delete Button - Only shown to the video owner or Admin */}
+                    {canUserDeleteReel(reel, authUser) && (
+                      <div className="absolute top-2 right-2 z-10">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReelToDelete(reel);
+                          }}
+                          className="p-1.5 rounded-full bg-red-600/90 text-white hover:bg-red-500 transition-all shadow-lg active:scale-90 cursor-pointer"
+                          title="Delete this Video"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
 
                     {/* Bottom Info & Play */}
                     <div

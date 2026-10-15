@@ -60,6 +60,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   };
 
   const handlePost = async () => {
+    if (isProcessing) return;
     setIsProcessing(true);
     let rawUrl = archiveUrlInput.trim();
     let finalUrl = rawUrl ? getCleanVideoUrl(rawUrl) : '';
@@ -75,16 +76,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     const finalCaption = caption.trim() || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu';
 
-    onPostLive(finalUrl, finalCaption, selectedFile, thumbnailPreview || undefined, initialSongName || undefined, selectedCategory);
-
-    // Reset modal state
-    setSelectedFile(null);
-    setPreviewUrl(null);
-    setThumbnailPreview(null);
-    setArchiveUrlInput('');
-    setCaption('');
-    setIsProcessing(false);
-    onClose();
+    try {
+      await onPostLive(finalUrl, finalCaption, selectedFile, thumbnailPreview || undefined, initialSongName || undefined, selectedCategory);
+    } finally {
+      // Reset modal state
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      setThumbnailPreview(null);
+      setArchiveUrlInput('');
+      setCaption('');
+      setIsProcessing(false);
+      onClose();
+    }
   };
 
   return (
@@ -206,12 +209,24 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={handlePost}
               disabled={isProcessing}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 font-extrabold text-sm text-white shadow-lg shadow-pink-500/30 hover:opacity-90 active:scale-98 transition-all flex items-center justify-center gap-2"
+              className={`w-full py-3.5 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 font-extrabold text-sm text-white shadow-lg shadow-pink-500/30 transition-all flex items-center justify-center gap-2 ${
+                isProcessing ? 'opacity-75 cursor-not-allowed' : 'hover:opacity-90 active:scale-98 cursor-pointer'
+              }`}
             >
-              <Sparkles className="w-4 h-4" />
-              <span>{isProcessing ? 'Processing & Syncing...' : 'Publish Video Reel / वीडियो पोस्ट करें'}</span>
+              {isProcessing ? (
+                <>
+                  <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  <span>अपलोड हो रहा है... (Uploading & Syncing)</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Publish Video Reel / वीडियो पोस्ट करें</span>
+                </>
+              )}
             </button>
           </div>
         ) : (
@@ -309,12 +324,17 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                 />
                 <button
+                  type="button"
                   onClick={handlePost}
                   disabled={!archiveUrlInput.trim() || isProcessing}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-extrabold text-xs transition-colors shrink-0 flex items-center gap-1"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-extrabold text-xs transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Publish</span>
+                  {isProcessing ? (
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-black/30 border-t-black animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isProcessing ? 'Publishing...' : 'Publish'}</span>
                 </button>
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-slate-400 pt-0.5">

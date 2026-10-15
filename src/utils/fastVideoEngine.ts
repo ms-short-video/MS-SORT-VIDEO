@@ -84,10 +84,9 @@ export async function prewarmVideoChunk(
     });
 
     if (response.status === 200 || response.status === 206) {
-      if (hasCacheApi) {
+      if (hasCacheApi && response.status === 200) {
         try {
           const cache = await caches.open(CACHE_NAME);
-          // Store response clone in CacheStorage
           cache.put(videoUrl, response.clone()).catch(() => {});
         } catch {
           // ignore cache put errors
