@@ -53,11 +53,9 @@ function prewarmVideoUrl(url: string, priority: 'high' | 'low' = 'high') {
   }
   prewarmedVideoCache.add(url);
   try {
-    // Background fetch first 2MB to warm up browser HTTP cache with high priority
     fetch(url, {
       method: 'GET',
-      headers: { Range: priority === 'high' ? 'bytes=0-2097151' : 'bytes=0-1048575' },
-      cache: 'force-cache',
+      headers: { Range: priority === 'high' ? 'bytes=0-1048575' : 'bytes=0-524287' },
     }).catch(() => {
       // ignore
     });
@@ -146,7 +144,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     // 1. Fast local stream or direct URL (2.4ms TTFB with HTTP 206 Range)
     const clean = getCleanVideoUrl(reel.videoUrl);
     if (clean) {
-      setVideoSrc(clean);
+      setVideoSrc((prev) => (prev === clean ? prev : clean));
       return;
     }
 
@@ -155,7 +153,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     if (archiveUrl) {
       const cleanArchive = getCleanVideoUrl(archiveUrl);
       if (cleanArchive) {
-        setVideoSrc(cleanArchive);
+        setVideoSrc((prev) => (prev === cleanArchive ? prev : cleanArchive));
         return;
       }
     }
@@ -165,7 +163,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       try {
         const localData = await getVideoDataUrl(reel.id);
         if (localData) {
-          setVideoSrc(localData);
+          setVideoSrc((prev) => (prev === localData ? prev : localData));
           return;
         }
       } catch {
@@ -178,18 +176,42 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     resolveVideo();
   }, [resolveVideo]);
 
-  // Clean error recovery without disrupting fast local playback
+  // Clean error recovery without disrupting active playback
   const handleVideoError = async () => {
     const video = videoRef.current;
-    // MEDIA_ERR_ABORTED (code 1) is dispatched normally when scrolling away; ignore it!
-    if (video?.error?.code === 1) {
+    const mediaErr = video?.error;
+
+    // Detailed error event logging for diagnostic monitoring
+    console.warn('Video player error event:', {
+      reelId: reel.id,
+      code: mediaErr?.code,
+      message: mediaErr?.message,
+      videoSrc,
+      currentTime: video?.currentTime,
+      readyState: video?.readyState,
+      networkState: video?.networkState,
+    });
+
+    // MEDIA_ERR_ABORTED (code 1) is dispatched normally when scrolling away or pausing; ignore it!
+    if (mediaErr?.code === 1) {
       return;
     }
     if (!isActive) {
       return;
     }
 
-    console.warn('Playback notice for reel:', reel.id, videoSrc, 'Attempting auto-recovery...');
+    // If video was already playing and has valid playback progress, resume playback rather than aborting
+    if (video && video.currentTime > 0) {
+      try {
+        await video.play();
+        setIsPlaying(true);
+        setIsBuffering(false);
+        setHasPlaybackError(false);
+        return;
+      } catch {
+        // continue to recovery
+      }
+    }
 
     // 1. If local path failed, failover to archive download URL
     const archiveUrl = (reel as any).archiveDownloadUrl || (reel as any).archiveChannelUrl;
@@ -240,15 +262,14 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       // ignore
     }
 
-    // 4. Gentle auto-retry once
-    if (retryCountRef.current < 1) {
+    // 4. Gentle auto-retry twice with backoff before displaying retry overlay
+    if (retryCountRef.current < 2) {
       retryCountRef.current += 1;
       setTimeout(() => {
         if (videoRef.current && isActive) {
-          videoRef.current.currentTime = 0;
           videoRef.current.play().catch(() => {});
         }
-      }, 500);
+      }, 500 * retryCountRef.current);
       return;
     }
 
@@ -291,9 +312,9 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   useEffect(() => {
     if (!videoSrc) return;
 
-    // 1. If this card is active or flagged for prebuffering, trigger HTTP Range pre-warm chunk
-    if (isActive || shouldPreloadBuffer || lifecycleState === 'standby') {
-      prewarmVideoChunk(reel.id, videoSrc, isActive ? 'high' : 'normal').catch(() => {});
+    // 1. Never background-fetch the active video! Prewarming is strictly for adjacent standby reels
+    if (!isActive && (shouldPreloadBuffer || lifecycleState === 'standby')) {
+      prewarmVideoChunk(reel.id, videoSrc, 'normal').catch(() => {});
     }
 
     const video = videoRef.current;
@@ -308,7 +329,11 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     }
 
     // 3. For standby / metadata / active videos: ensure src is properly attached without redundant resets
-    if (lastConfiguredSrcRef.current !== videoSrc || !video.getAttribute('src')) {
+    const currentSrc = video.getAttribute('src') || '';
+    if (
+      (lastConfiguredSrcRef.current !== videoSrc && !currentSrc.endsWith(videoSrc) && video.currentSrc !== videoSrc) ||
+      (!currentSrc && videoSrc)
+    ) {
       video.src = videoSrc;
       lastConfiguredSrcRef.current = videoSrc;
     }
@@ -320,6 +345,12 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       video.preload = preloadMode;
     }
   }, [isActive, shouldPreloadBuffer, lifecycleState, preloadMode, preloadDistance, videoSrc, reel.id]);
+
+  // Track global mute state in ref to avoid re-running playback effect on volume change
+  const isGloballyMutedRef = useRef(isGloballyMuted);
+  useEffect(() => {
+    isGloballyMutedRef.current = isGloballyMuted;
+  }, [isGloballyMuted]);
 
   // Auto-play when active in viewport with strict single-audio enforcement:
   // Each video plays its own native music/sound when live; scrolling immediately silences other videos!
@@ -354,9 +385,10 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         // ignore
       }
 
-      // 2. Clear loud audio on active video with its own music
-      video.muted = isGloballyMuted;
-      video.volume = isGloballyMuted ? 0 : 1.0;
+      // 2. Play active video with its sound state
+      const currentMuted = isGloballyMutedRef.current;
+      video.muted = currentMuted;
+      video.volume = currentMuted ? 0 : 1.0;
 
       const playPromise = video.play();
       if (playPromise !== undefined) {
@@ -365,14 +397,14 @@ export const ReelCard: React.FC<ReelCardProps> = ({
             if (!isMounted) return;
             setIsPlaying(true);
             setIsBuffering(false);
-            if (!isGloballyMuted) {
+            if (!isGloballyMutedRef.current) {
               video.muted = false;
               video.volume = 1.0;
             }
           })
           .catch((err) => {
             if (!isMounted) return;
-            console.warn('Initial autoplay audio restriction handled, playing with auto-unmute:', err);
+            console.warn('Initial autoplay restriction handled, playing muted first:', err);
             video.muted = true;
             video
               .play()
@@ -380,7 +412,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
                 if (!isMounted) return;
                 setIsPlaying(true);
                 setIsBuffering(false);
-                if (!isGloballyMuted) {
+                if (!isGloballyMutedRef.current) {
                   video.muted = false;
                   video.volume = 1.0;
                 }
@@ -408,7 +440,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         video.volume = 0;
       }
     };
-  }, [isActive, isGloballyMuted]);
+  }, [isActive]);
 
   const [volumeIndicator, setVolumeIndicator] = useState<'muted' | 'unmuted' | null>(null);
 

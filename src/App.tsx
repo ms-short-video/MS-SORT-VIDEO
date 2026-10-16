@@ -639,12 +639,17 @@ export function App() {
                 archiveDownloadUrl: archive || (r as any).archiveDownloadUrl,
               };
             });
-          if (cleanRemote.length > 0) {
             setReels((prev) => {
               const cleanPrev = prev.filter((p) => !isDummyReel(p) && !deletedReelIds.has(p.id));
-              return deduplicateReels([...cleanPrev, ...cleanRemote], deletedReelIds);
+              const merged = deduplicateReels([...cleanPrev, ...cleanRemote], deletedReelIds);
+              if (
+                merged.length !== cleanPrev.length ||
+                JSON.stringify(merged.map((r) => r.id)) !== JSON.stringify(cleanPrev.map((r) => r.id))
+              ) {
+                return merged;
+              }
+              return prev;
             });
-          }
         }
       });
     } catch (err) {

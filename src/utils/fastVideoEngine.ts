@@ -73,31 +73,21 @@ export async function prewarmVideoChunk(
       }
     }
 
-    // Execute HTTP Range request for the first 1MB of video
+    // Gently warm TCP connection with standard range fetch without cache poisoning
     const response = await fetch(videoUrl, {
       method: 'GET',
       headers: {
         Range: `bytes=0-${INITIAL_CHUNK_BYTES - 1}`,
       },
       signal: controller.signal,
-      cache: 'force-cache',
     });
 
     if (response.status === 200 || response.status === 206) {
-      if (hasCacheApi && response.status === 200) {
-        try {
-          const cache = await caches.open(CACHE_NAME);
-          cache.put(videoUrl, response.clone()).catch(() => {});
-        } catch {
-          // ignore cache put errors
-        }
-      }
-
-      // Read initial buffer to guarantee TCP pipeline has primed memory
+      // Consume a small piece to warm up TCP socket
       const reader = response.body?.getReader();
       if (reader) {
-        await reader.read();
-        reader.releaseLock();
+        await reader.read().catch(() => {});
+        try { reader.releaseLock(); } catch {}
       }
 
       const entry = activePreloads.get(reelId);
@@ -112,7 +102,6 @@ export async function prewarmVideoChunk(
     return false;
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      // Intentionally aborted due to fast scrolling
       return false;
     }
     const entry = activePreloads.get(reelId);

@@ -1,5 +1,5 @@
 // MS Shorts VIP Service Worker
-const CACHE_NAME = 'ms-shorts-vip-v4';
+const CACHE_NAME = 'ms-shorts-vip-v5';
 const OFFLINE_URL = '/';
 
 // Pre-cache essential app shell assets on install
@@ -55,17 +55,28 @@ self.addEventListener('fetch', (event) => {
 
   const url = request.url;
 
-  // NEVER intercept Vite dev dependencies, source files, or versioned chunks to prevent duplicate React runtime instances
+  // NEVER intercept media streams, Range requests, audio/video assets, or backend streaming APIs
   if (
+    request.headers.has('range') ||
+    request.destination === 'video' ||
+    request.destination === 'audio' ||
+    url.includes('.mp4') ||
+    url.includes('.webm') ||
+    url.includes('.mov') ||
+    url.includes('.m4v') ||
+    url.includes('.mp3') ||
+    url.includes('archive.org') ||
+    url.includes('ia601807') ||
+    url.includes('/uploads/') ||
+    url.includes('/sample-videos/') ||
+    url.includes('/api/') ||
     url.includes('/node_modules/') ||
     url.includes('/@') ||
     url.includes('/src/') ||
     url.includes('?v=') ||
     url.includes('chunk-') ||
     url.includes('/vite') ||
-    url.includes('/__vite') ||
-    url.includes('/api/') ||
-    url.includes('/uploads/')
+    url.includes('/__vite')
   ) {
     return;
   }

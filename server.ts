@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { Readable } from 'stream';
 import { createServer as createViteServer } from 'vite';
 
 const PORT = 3000;
@@ -124,9 +125,13 @@ const streamFile = (filePath: string, req: express.Request, res: express.Respons
   if (range && contentType.startsWith('video/')) {
     const parts = range.replace(/bytes=/, '').split('-');
     const start = parseInt(parts[0], 10);
-    // If end is not specified, chunk up to 2MB or fileSize to allow instant initial frame playback
-    const maxChunk = 2 * 1024 * 1024; // 2MB chunk
-    const end = parts[1] ? parseInt(parts[1], 10) : Math.min(fileSize - 1, start + maxChunk - 1);
+    if (isNaN(start) || start >= fileSize) {
+      res.setHeader('Content-Range', `bytes */${fileSize}`);
+      return res.status(416).send('Requested range not satisfiable');
+    }
+    const end = parts[1] && parts[1].trim().length > 0
+      ? Math.min(fileSize - 1, parseInt(parts[1], 10))
+      : fileSize - 1;
     const chunksize = end - start + 1;
     const file = fs.createReadStream(filePath, { start, end });
     req.on('close', () => {
@@ -153,11 +158,35 @@ const streamFile = (filePath: string, req: express.Request, res: express.Respons
 };
 
 app.get('/uploads/:filename', (req, res) => {
-  streamFile(path.join(UPLOADS_DIR, req.params.filename), req, res);
+  const filename = req.params.filename;
+  let localPath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(localPath)) {
+    const pub = path.join(process.cwd(), 'public', 'uploads', filename);
+    if (fs.existsSync(pub)) localPath = pub;
+  }
+  if (!fs.existsSync(localPath)) {
+    if (filename.includes('aqnd') || filename.includes('AQNd5OfGs')) {
+      return res.redirect('https://archive.org/download/aqnd-5-of-gs-sv-biu-xgh-nu-wiwt-qyeutzuhh-sswsr-wjb-mhc-sy-kk-mqe-mfrlz-1-qqufob/AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4');
+    }
+    if (filename.includes('1792054189770') || filename.includes('mv9asmh6')) {
+      return res.redirect('https://archive.org/download/msshortsvip-mv9asmh6-3o6ufs/reel_1792054189770.mp4');
+    }
+    return res.status(404).send('Not found');
+  }
+  streamFile(localPath, req, res);
 });
 
 app.head('/uploads/:filename', (req, res) => {
-  streamFile(path.join(UPLOADS_DIR, req.params.filename), req, res);
+  const filename = req.params.filename;
+  let localPath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(localPath)) {
+    const pub = path.join(process.cwd(), 'public', 'uploads', filename);
+    if (fs.existsSync(pub)) localPath = pub;
+  }
+  if (!fs.existsSync(localPath)) {
+    return res.status(404).send('Not found');
+  }
+  streamFile(localPath, req, res);
 });
 
 app.get('/sample-videos/:filename', (req, res) => {
@@ -213,7 +242,11 @@ app.get('/api/stream', async (req, res) => {
   // If local file matches in uploads, stream directly with zero latency
   if (targetUrl.includes('/uploads/')) {
     const filename = path.basename(targetUrl.split('?')[0]);
-    const localPath = path.join(UPLOADS_DIR, filename);
+    let localPath = path.join(UPLOADS_DIR, filename);
+    if (!fs.existsSync(localPath)) {
+      const pub = path.join(process.cwd(), 'public', 'uploads', filename);
+      if (fs.existsSync(pub)) localPath = pub;
+    }
     if (fs.existsSync(localPath)) {
       return streamFile(localPath, req, res);
     }
@@ -221,11 +254,13 @@ app.get('/api/stream', async (req, res) => {
 
   // Fast mapping for verified October 15, 2026 uploads
   if (targetUrl.includes('aqnd') || targetUrl.includes('AQNd5OfGs')) {
-    const p = path.join(UPLOADS_DIR, 'AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4');
+    let p = path.join(UPLOADS_DIR, 'AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4');
+    if (!fs.existsSync(p)) p = path.join(process.cwd(), 'public', 'uploads', 'AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4');
     if (fs.existsSync(p)) return streamFile(p, req, res);
   }
   if (targetUrl.includes('1792054189770') || targetUrl.includes('mv9asmh6')) {
-    const p = path.join(UPLOADS_DIR, 'reel_1792054189770.mp4');
+    let p = path.join(UPLOADS_DIR, 'reel_1792054189770.mp4');
+    if (!fs.existsSync(p)) p = path.join(process.cwd(), 'public', 'uploads', 'reel_1792054189770.mp4');
     if (fs.existsSync(p)) return streamFile(p, req, res);
   }
 
@@ -255,16 +290,14 @@ app.get('/api/stream', async (req, res) => {
     if (req.method === 'HEAD' || !remoteRes.body) {
       return res.end();
     }
-    const reader = remoteRes.body.getReader();
+    const nodeStream = Readable.fromWeb(remoteRes.body as any);
     req.on('close', () => {
-      reader.cancel().catch(() => {});
+      nodeStream.destroy();
     });
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      res.write(Buffer.from(value));
-    }
-    res.end();
+    nodeStream.on('error', (err) => {
+      console.warn('NodeStream error ignored:', err?.message);
+    });
+    nodeStream.pipe(res);
   } catch (err: any) {
     console.warn('Proxy stream notice:', err?.message);
     if (!res.headersSent) res.status(502).send('Error streaming media');
