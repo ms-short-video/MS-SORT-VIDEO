@@ -33,13 +33,13 @@ export function getCleanVideoUrl(url: string | undefined | null): string {
     return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   }
 
-  // 2. Map verified user uploads to fast local stream paths (instant 2ms TTFB with HTTP 206 Byte-Range streaming)
-  if (trimmed.includes('1791983508338') || trimmed.includes('sunil_mahto') || trimmed.includes('4swis')) {
-    return '/uploads/reel_1791983508338.mp4';
+  // 2. Map verified October 15, 2026 user uploads to fast local stream paths (instant 2ms TTFB with HTTP 206 Byte-Range streaming)
+  if (trimmed.includes('aqnd') || trimmed.includes('AQNd5OfGs')) {
+    return '/uploads/AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4';
   }
 
-  if (trimmed.includes('1788538428014') || trimmed.includes('7buxs') || trimmed.includes('1788424088669')) {
-    return '/uploads/reel_1788538428014_7buxs.mp4';
+  if (trimmed.includes('1792054189770') || trimmed.includes('mv9asmh6')) {
+    return '/uploads/reel_1792054189770.mp4';
   }
 
   // If URL has /uploads/ path anywhere, normalize to clean relative path

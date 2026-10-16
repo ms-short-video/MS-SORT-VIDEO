@@ -107,14 +107,12 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   const [videoSrc, setVideoSrc] = useState<string>(() => getCleanVideoUrl(reel.videoUrl));
   const lastConfiguredSrcRef = useRef<string>(getCleanVideoUrl(reel.videoUrl));
 
-  // Reset errors and retry counter whenever reel becomes active in viewport
+  // Reset errors and retry counter whenever reel changes or becomes active in viewport
   useEffect(() => {
-    if (isActive) {
-      setHasPlaybackError(false);
-      setErrorMessage('');
-      retryCountRef.current = 0;
-    }
-  }, [isActive]);
+    setHasPlaybackError(false);
+    setErrorMessage('');
+    retryCountRef.current = 0;
+  }, [reel.id, reel.videoUrl, isActive]);
 
   // Active watch time tracking for AI Recommendation Algorithm (without re-rendering state every second)
   useEffect(() => {
@@ -163,7 +161,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     }
 
     // 3. Fall back to local device IndexedDB cache
-    if (reel.isUserUploaded || reel.id.startsWith('user-reel')) {
+    if (reel.isUserUploaded || reel.id.startsWith('user-reel') || reel.id.startsWith('reel-')) {
       try {
         const localData = await getVideoDataUrl(reel.id);
         if (localData) {
@@ -193,7 +191,22 @@ export const ReelCard: React.FC<ReelCardProps> = ({
 
     console.warn('Playback notice for reel:', reel.id, videoSrc, 'Attempting auto-recovery...');
 
-    // 1. If external stream failed, route through high-speed server stream proxy
+    // 1. If local path failed, failover to archive download URL
+    const archiveUrl = (reel as any).archiveDownloadUrl || (reel as any).archiveChannelUrl;
+    if (videoSrc.startsWith('/uploads/') && archiveUrl && videoSrc !== archiveUrl) {
+      setVideoSrc(archiveUrl);
+      setHasPlaybackError(false);
+      setIsBuffering(false);
+      if (videoRef.current) {
+        lastConfiguredSrcRef.current = archiveUrl;
+        videoRef.current.src = archiveUrl;
+        videoRef.current.load();
+        videoRef.current.play().catch(() => {});
+      }
+      return;
+    }
+
+    // 2. If external stream failed, route through high-speed server stream proxy
     if (videoSrc.startsWith('http') && !videoSrc.includes('/api/stream') && !videoSrc.includes('/uploads/')) {
       const proxied = `/api/stream?url=${encodeURIComponent(videoSrc)}`;
       setVideoSrc(proxied);
@@ -208,7 +221,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       return;
     }
 
-    // 2. Try IndexedDB cached video data
+    // 3. Try IndexedDB cached video data
     try {
       const localData = await getVideoDataUrl(reel.id);
       if (localData && localData !== videoSrc) {
@@ -227,7 +240,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       // ignore
     }
 
-    // 3. Gentle auto-retry once
+    // 4. Gentle auto-retry once
     if (retryCountRef.current < 1) {
       retryCountRef.current += 1;
       setTimeout(() => {
@@ -301,8 +314,9 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     }
 
     if (!isActive) {
-      video.muted = true;
       video.pause();
+      video.muted = true;
+      video.volume = 0;
       video.preload = preloadMode;
     }
   }, [isActive, shouldPreloadBuffer, lifecycleState, preloadMode, preloadDistance, videoSrc, reel.id]);
@@ -323,6 +337,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           if (v !== video) {
             v.pause();
             v.muted = true;
+            v.volume = 0;
           }
         });
       } catch {
@@ -341,7 +356,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
 
       // 2. Clear loud audio on active video with its own music
       video.muted = isGloballyMuted;
-      video.volume = 1.0;
+      video.volume = isGloballyMuted ? 0 : 1.0;
 
       const playPromise = video.play();
       if (playPromise !== undefined) {
@@ -380,6 +395,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       // 3. When scrolled away, immediately pause and completely mute sound with zero audio bleed!
       video.pause();
       video.muted = true;
+      video.volume = 0;
       setIsPlaying(false);
       setIsBuffering(false);
     }
@@ -389,6 +405,7 @@ export const ReelCard: React.FC<ReelCardProps> = ({
       if (video) {
         video.pause();
         video.muted = true;
+        video.volume = 0;
       }
     };
   }, [isActive, isGloballyMuted]);
@@ -543,6 +560,28 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         onWaiting={() => {
           if (isActive && !hasRenderedFrame) setIsBuffering(true);
         }}
+        onPlay={() => {
+          if (!isActive) {
+            if (videoRef.current) {
+              videoRef.current.pause();
+              videoRef.current.muted = true;
+              videoRef.current.volume = 0;
+            }
+            setIsPlaying(false);
+            return;
+          }
+          // Strictly silence all other video elements across the whole DOM
+          try {
+            const allVideos = document.querySelectorAll('video');
+            allVideos.forEach((v) => {
+              if (v !== videoRef.current) {
+                v.pause();
+                v.muted = true;
+                v.volume = 0;
+              }
+            });
+          } catch {}
+        }}
         onPlaying={() => {
           if (!isActive) {
             if (videoRef.current) {
@@ -553,12 +592,22 @@ export const ReelCard: React.FC<ReelCardProps> = ({
             setIsPlaying(false);
             return;
           }
+          try {
+            const allVideos = document.querySelectorAll('video');
+            allVideos.forEach((v) => {
+              if (v !== videoRef.current) {
+                v.pause();
+                v.muted = true;
+                v.volume = 0;
+              }
+            });
+          } catch {}
           setIsPlaying(true);
           setIsBuffering(false);
           setHasRenderedFrame(true);
-          if (!isGloballyMuted && videoRef.current) {
-            videoRef.current.muted = false;
-            videoRef.current.volume = 1.0;
+          if (videoRef.current) {
+            videoRef.current.muted = isGloballyMuted;
+            videoRef.current.volume = isGloballyMuted ? 0 : 1.0;
           }
         }}
         onCanPlay={() => {
@@ -572,9 +621,15 @@ export const ReelCard: React.FC<ReelCardProps> = ({
             setIsPlaying(false);
             return;
           }
-          if (!isGloballyMuted && videoRef.current) {
-            videoRef.current.muted = false;
-            videoRef.current.volume = 1.0;
+          if (videoRef.current) {
+            videoRef.current.muted = isGloballyMuted;
+            videoRef.current.volume = isGloballyMuted ? 0 : 1.0;
+          }
+        }}
+        onVolumeChange={() => {
+          if (!isActive && videoRef.current && (!videoRef.current.muted || videoRef.current.volume > 0)) {
+            videoRef.current.muted = true;
+            videoRef.current.volume = 0;
           }
         }}
         onPause={() => setIsPlaying(false)}

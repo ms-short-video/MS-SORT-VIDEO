@@ -35,12 +35,34 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { SplashScreen } from './components/SplashScreen';
 import { Copy, AlertTriangle, X, CheckCircle2, Bell, Video, Camera, Upload, Sparkles, Film, Crown, SlidersHorizontal, Gift, ShieldCheck, Database, HardDrive, Coins, Cloud, Volume2, VolumeX } from 'lucide-react';
 
+export const CONFIRMED_DELETED_SIGNATURES = [
+  '1791983508338',
+  '1788538428014',
+  '1788424088669',
+  'msshortsvip-sunil',
+  '1791983500312',
+  '1791987059470',
+  '1792061082125',
+  '1792061209473',
+  'ck82zl',
+  'litterbox',
+  'catbox.moe',
+  '7buxs',
+  '4swis',
+];
+
 export function isDummyReel(r: any): boolean {
   if (!r || !r.id) return true;
   const url = String(r.videoUrl || '').toLowerCase();
+  const archive = String(r.archiveDownloadUrl || r.archiveChannelUrl || '').toLowerCase();
   const id = String(r.id).toLowerCase();
 
-  // Filter out expired dead litterbox URLs and all sample/dummy videos
+  // Filter out confirmed deleted video records and dead litterbox URLs
+  if (CONFIRMED_DELETED_SIGNATURES.some((sig) => url.includes(sig) || archive.includes(sig) || id.includes(sig))) {
+    return true;
+  }
+
+  // Filter out sample/dummy placeholder videos
   if (
     url.includes('/sample-videos/') ||
     id.startsWith('local-reel-') ||
@@ -50,8 +72,6 @@ export function isDummyReel(r: any): boolean {
     url.includes('bunny.mp4') ||
     url.includes('sample1.mp4') ||
     url.includes('flower.mp4') ||
-    url.includes('litterbox') ||
-    url.includes('litter.catbox') ||
     url.includes('oceans.mp4') ||
     url.includes('mediaelement') ||
     url.includes('echo-hereweare') ||
@@ -60,15 +80,6 @@ export function isDummyReel(r: any): boolean {
     url.includes('assets.mixkit.co')
   ) {
     return true;
-  }
-
-  // User uploaded videos and camera recordings are valid
-  if (
-    r.isUserUploaded === true ||
-    id.startsWith('user-') ||
-    id.startsWith('cam-')
-  ) {
-    return false;
   }
 
   return false;
@@ -176,69 +187,82 @@ export function App() {
     setAuthUser(null);
   };
 
-  // Verified active user videos (Fast 2.4ms local streaming with permanent Archive.org cloud sync)
+  // Verified active user videos from October 15, 2026 (Preserved lifetime storage with zero latency local streams & Archive.org cloud sync)
   const VERIFIED_INITIAL_REELS: VideoReel[] = [
     {
-      id: 'user-reel-1791983500312-4swis',
-      videoUrl: '/uploads/reel_1791983508338.mp4',
-      archiveDownloadUrl: 'https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4',
-      archiveChannelUrl: 'https://archive.org/download/msshortsvip-sunil-1791983508338/reel.mp4',
-      poster: '/uploads/poster_reel_1791983508338.jpg',
-      username: '@sunil_mahto',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      ownerUid: 'uHKqNIpC80UKRGhoXzAejfHMNTi2',
-      uploaderId: 'uHKqNIpC80UKRGhoXzAejfHMNTi2',
-      uploaderEmail: 'sunil.mahto@gmail.com',
-      caption: 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
-      category: 'music',
-      hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
-      songName: 'Original Audio - @sunil_mahto',
-      likes: 42,
-      commentsCount: 3,
-      sharesCount: 5,
-      isLiked: true,
-      isFollowing: true,
-      isUserUploaded: true,
-      isVip: true,
-      vipLevel: 1,
-      storageProvider: 'archive.org',
-      createdAt: 'Just now',
-    },
-    {
-      id: 'user-reel_1788424088669_test_upload',
-      videoUrl: '/uploads/reel_1788538428014_7buxs.mp4',
-      archiveDownloadUrl: 'https://archive.org/download/ms-shorts-vip-1788538428014-7buxs/reel_1788538428014_7buxs.mp4',
-      archiveChannelUrl: 'https://archive.org/download/ms-shorts-vip-1788538428014-7buxs/reel_1788538428014_7buxs.mp4',
-      poster: '/uploads/poster_reel_1788538428014_7buxs.jpg',
+      id: 'reel-aqnd-1792064602',
+      videoUrl: '/uploads/AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4',
+      archiveDownloadUrl: 'https://archive.org/download/aqnd-5-of-gs-sv-biu-xgh-nu-wiwt-qyeutzuhh-sswsr-wjb-mhc-sy-kk-mqe-mfrlz-1-qqufob/AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4',
+      archiveChannelUrl: 'https://archive.org/download/aqnd-5-of-gs-sv-biu-xgh-nu-wiwt-qyeutzuhh-sswsr-wjb-mhc-sy-kk-mqe-mfrlz-1-qqufob/AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4',
+      poster: '/uploads/poster_aqnd.jpg',
       username: '@Mehndi_Babu',
       avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
       ownerUid: 'google-user-mehndibabu84',
       uploaderId: 'google-user-mehndibabu84',
       uploaderEmail: 'mehndibabu84@gmail.com',
-      caption: 'My Uploaded Video 📱✨ #MehndiBabu #MSShortsVIP',
-      category: 'dance',
-      hashtags: ['#MehndiBabu', '#MSShortsVIP', '#Viral'],
-      songName: 'Original Sound - Mehndi Babu',
-      likes: 120,
-      commentsCount: 15,
-      sharesCount: 8,
+      caption: 'रील - AQNd 5 Of Gs ✨📱 #Viral #MSShortsVIP #MehndiBabu',
+      category: 'viral',
+      hashtags: ['#Viral', '#MSShortsVIP', '#MehndiBabu'],
+      songName: 'Original Audio - Mehndi Babu',
+      likes: 56,
+      commentsCount: 4,
+      sharesCount: 7,
       isLiked: false,
       isFollowing: true,
       isUserUploaded: true,
       isVip: true,
       vipLevel: 1,
       storageProvider: 'archive.org',
-      createdAt: 'Recently uploaded',
+      createdAt: 'October 15, 2026',
+    },
+    {
+      id: 'user-reel-1792054189770',
+      videoUrl: '/uploads/reel_1792054189770.mp4',
+      archiveDownloadUrl: 'https://archive.org/download/msshortsvip-mv9asmh6-3o6ufs/reel_1792054189770.mp4',
+      archiveChannelUrl: 'https://archive.org/download/msshortsvip-mv9asmh6-3o6ufs/reel_1792054189770.mp4',
+      poster: '/uploads/poster_reel_1792054189770.jpg',
+      username: '@Mehndi_Babu',
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      ownerUid: 'google-user-mehndibabu84',
+      uploaderId: 'google-user-mehndibabu84',
+      uploaderEmail: 'mehndibabu84@gmail.com',
+      caption: 'New reel uploaded synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+      category: 'music',
+      hashtags: ['#Viral', '#MSShortsVIP', '#MehndiBabu'],
+      songName: 'Original Audio - Mehndi Babu',
+      likes: 128,
+      commentsCount: 18,
+      sharesCount: 12,
+      isLiked: false,
+      isFollowing: true,
+      isUserUploaded: true,
+      isVip: true,
+      vipLevel: 1,
+      storageProvider: 'archive.org',
+      createdAt: 'October 15, 2026',
     },
   ];
 
-  // Blacklist of deleted reel IDs to prevent resurrection across sessions
+  // Blacklist of confirmed deleted reel IDs to prevent resurrection across sessions
   const [deletedReelIds, setDeletedReelIds] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('ms_shorts_deleted_reels');
-      return saved ? new Set(JSON.parse(saved)) : new Set();
+      const set = saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
+      CONFIRMED_DELETED_SIGNATURES.forEach((sig) => set.add(sig));
+      set.add('user-reel-1791983500312-4swis');
+      set.add('user-reel_1788424088669_test_upload');
+      set.add('user-reel-1791987059470-yojjx');
+      set.add('user-reel-1792061082125-fj8z1');
+      set.add('user-reel-1792061209473-1g8xs');
+      return set;
     } catch {
-      return new Set();
+      return new Set([
+        'user-reel-1791983500312-4swis',
+        'user-reel_1788424088669_test_upload',
+        'user-reel-1791987059470-yojjx',
+        'user-reel-1792061082125-fj8z1',
+        'user-reel-1792061209473-1g8xs',
+      ]);
     }
   });
 
@@ -248,11 +272,12 @@ export function App() {
     } catch {}
   }, [deletedReelIds]);
 
-  // Load initial reels from localStorage or cloud (purging ALL dummy/sample reels and deleted reels)
+  // Load initial reels from localStorage or cloud (purging ALL dummy/sample reels and confirmed deleted reels)
   const [reels, setReels] = useState<VideoReel[]>(() => {
     try {
       const savedDeleted = localStorage.getItem('ms_shorts_deleted_reels');
       const deletedSet: Set<string> = savedDeleted ? new Set(JSON.parse(savedDeleted)) : new Set();
+      CONFIRMED_DELETED_SIGNATURES.forEach((sig) => deletedSet.add(sig));
 
       const saved = localStorage.getItem('ms_shorts_vip_reels');
       if (saved) {
@@ -269,11 +294,12 @@ export function App() {
               };
             });
           if (cleanUserReels.length > 0) {
-            return deduplicateReels(cleanUserReels, deletedSet);
+            const merged = deduplicateReels([...VERIFIED_INITIAL_REELS, ...cleanUserReels], deletedSet);
+            return merged.length > 0 ? merged : VERIFIED_INITIAL_REELS;
           }
         }
       }
-      return VERIFIED_INITIAL_REELS.filter((r) => !deletedSet.has(r.id));
+      return VERIFIED_INITIAL_REELS;
     } catch {
       return VERIFIED_INITIAL_REELS;
     }
@@ -504,11 +530,15 @@ export function App() {
       }
     };
 
-    // Clean up any stale localStorage entries containing dead litterbox URLs from previous sessions
+    // Invalidate confirmed deleted video references from localStorage cache
     try {
       const saved = localStorage.getItem('ms_shorts_vip_reels');
-      if (saved && (saved.includes('litterbox') || saved.includes('catbox.moe'))) {
-        localStorage.removeItem('ms_shorts_vip_reels');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((r: any) => !isDummyReel(r) && !deletedReelIds.has(r.id));
+          localStorage.setItem('ms_shorts_vip_reels', JSON.stringify(cleaned));
+        }
       }
     } catch {
       // ignore
@@ -694,7 +724,7 @@ export function App() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           const clean = parsed.filter((r) => !isDummyReel(r) && !deletedReelIds.has(r.id));
           if (clean.length > 0) {
-            setReels(deduplicateReels(clean, deletedReelIds));
+            setReels(deduplicateReels([...VERIFIED_INITIAL_REELS, ...clean], deletedReelIds));
           } else {
             setReels(initialSafe);
           }
@@ -708,15 +738,21 @@ export function App() {
       setReels(initialSafe);
     }
     setTimeout(() => {
-      const vid = document.querySelector('video');
-      if (vid) {
-        try {
-          vid.currentTime = 0;
-          vid.play().catch(() => {});
-        } catch (err) {
-          // ignore
+      const allVideos = document.querySelectorAll('video');
+      allVideos.forEach((v, idx) => {
+        if (idx === 0) {
+          try {
+            v.currentTime = 0;
+            v.muted = isGloballyMuted;
+            v.volume = isGloballyMuted ? 0 : 1.0;
+            v.play().catch(() => {});
+          } catch (err) {}
+        } else {
+          v.pause();
+          v.muted = true;
+          v.volume = 0;
         }
-      }
+      });
     }, 100);
   };
 
@@ -779,6 +815,20 @@ export function App() {
       setActiveReelIdx(newIdx);
       // Immediately abort stale in-flight network requests for skipped videos (> 2 away)
       cancelStalePreloads(newIdx, displayReels.map((r) => r.id));
+
+      // Instantly pause and mute previous and off-screen videos on swipe
+      try {
+        const allVideos = containerRef.current.querySelectorAll('video');
+        allVideos.forEach((v) => {
+          const card = v.closest('[data-reel-card]');
+          const cardIdx = card ? parseInt(card.getAttribute('data-reel-idx') || '-1', 10) : -1;
+          if (cardIdx !== newIdx) {
+            v.pause();
+            v.muted = true;
+            v.volume = 0;
+          }
+        });
+      } catch {}
     }
   };
 
@@ -799,6 +849,19 @@ export function App() {
               if (!isNaN(idx) && idx >= 0 && idx < displayReels.length && idx !== activeReelIdx) {
                 setActiveReelIdx(idx);
                 cancelStalePreloads(idx, displayReels.map((r) => r.id));
+
+                try {
+                  const allVideos = container.querySelectorAll('video');
+                  allVideos.forEach((v) => {
+                    const card = v.closest('[data-reel-card]');
+                    const cardIdx = card ? parseInt(card.getAttribute('data-reel-idx') || '-1', 10) : -1;
+                    if (cardIdx !== idx) {
+                      v.pause();
+                      v.muted = true;
+                      v.volume = 0;
+                    }
+                  });
+                } catch {}
               }
             }
           }
@@ -816,7 +879,36 @@ export function App() {
     return () => {
       observer.disconnect();
     };
-  }, [activeTab, displayReels.length]);
+  }, [activeTab, displayReels.length, activeReelIdx]);
+
+  // ACTIVE VIDEO AUDIO ONLY: Strictly enforce that only the visible feed video plays audio
+  useEffect(() => {
+    if (activeTab !== 'home' || !containerRef.current) {
+      const allVideos = document.querySelectorAll('video');
+      allVideos.forEach((v) => {
+        v.pause();
+        v.muted = true;
+        v.volume = 0;
+      });
+      return;
+    }
+
+    try {
+      const allVideos = containerRef.current.querySelectorAll('video');
+      allVideos.forEach((v) => {
+        const card = v.closest('[data-reel-card]');
+        const cardIdx = card ? parseInt(card.getAttribute('data-reel-idx') || '-1', 10) : -1;
+        if (cardIdx !== activeReelIdx) {
+          v.pause();
+          v.muted = true;
+          v.volume = 0;
+        } else {
+          v.muted = isGloballyMuted;
+          v.volume = isGloballyMuted ? 0 : 1.0;
+        }
+      });
+    } catch {}
+  }, [activeReelIdx, activeTab, isGloballyMuted]);
 
   // Keyboard Arrow navigation for multi-video vertical feed
   useEffect(() => {

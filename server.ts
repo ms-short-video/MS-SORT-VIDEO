@@ -219,13 +219,13 @@ app.get('/api/stream', async (req, res) => {
     }
   }
 
-  // Fast mapping for verified uploads
-  if (targetUrl.includes('1791983508338') || targetUrl.includes('sunil_mahto')) {
-    const p = path.join(UPLOADS_DIR, 'reel_1791983508338.mp4');
+  // Fast mapping for verified October 15, 2026 uploads
+  if (targetUrl.includes('aqnd') || targetUrl.includes('AQNd5OfGs')) {
+    const p = path.join(UPLOADS_DIR, 'AQNd5OfGsSvBiuXghNuWiwtQYEutzuhhSSWSrWjbMhcSyKkMQeMFrlz1QQufobWVkOFB2OnxvMO8o7ckBnsRzbeeS0gP7krG9RgD3ow.mp4');
     if (fs.existsSync(p)) return streamFile(p, req, res);
   }
-  if (targetUrl.includes('1788538428014') || targetUrl.includes('7buxs') || targetUrl.includes('1788424088669')) {
-    const p = path.join(UPLOADS_DIR, 'reel_1788538428014_7buxs.mp4');
+  if (targetUrl.includes('1792054189770') || targetUrl.includes('mv9asmh6')) {
+    const p = path.join(UPLOADS_DIR, 'reel_1792054189770.mp4');
     if (fs.existsSync(p)) return streamFile(p, req, res);
   }
 
