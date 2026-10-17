@@ -1749,6 +1749,14 @@ app.get('/sw.js', (req, res, next) => {
   next();
 });
 
+// 14. Google AdMob & AdSense Authorized Digital Sellers (app-ads.txt & ads.txt)
+app.get(['/app-ads.txt', '/ads.txt'], (req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send('google.com, pub-3065164841462560, DIRECT, f08c47fec0942fa0\n');
+});
+
 async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
