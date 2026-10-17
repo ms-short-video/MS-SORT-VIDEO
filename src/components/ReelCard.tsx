@@ -354,75 +354,74 @@ export const ReelCard: React.FC<ReelCardProps> = ({
 
   // Auto-play when active in viewport with strict single-audio enforcement:
   // Each video plays its own native music/sound when live; scrolling immediately silences other videos!
+  const attemptPlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || !isActive) return;
+
+    // 1. Immediately silence and pause all other video elements in the document to prevent audio overlap
+    try {
+      const otherVideos = document.querySelectorAll('video');
+      otherVideos.forEach((v) => {
+        if (v !== video) {
+          v.pause();
+          v.muted = true;
+          v.volume = 0;
+        }
+      });
+    } catch {
+      // ignore
+    }
+
+    try {
+      video.playsInline = true;
+      (video as unknown as { webkitPlaysInline?: boolean }).webkitPlaysInline = true;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
+      video.setAttribute('x5-playsinline', 'true');
+    } catch {
+      // ignore
+    }
+
+    // 2. Play active video with its sound state
+    const currentMuted = isGloballyMutedRef.current;
+    video.muted = currentMuted;
+    video.volume = currentMuted ? 0 : 1.0;
+
+    const playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise
+        .then(() => {
+          setIsPlaying(true);
+          setIsBuffering(false);
+          setHasPlaybackError(false);
+          if (!isGloballyMutedRef.current) {
+            video.muted = false;
+            video.volume = 1.0;
+          }
+        })
+        .catch((err) => {
+          console.warn('Initial autoplay restriction handled, playing muted first:', err);
+          video.muted = true;
+          video
+            .play()
+            .then(() => {
+              setIsPlaying(true);
+              setIsBuffering(false);
+              setHasPlaybackError(false);
+            })
+            .catch(() => {
+              setIsPlaying(false);
+            });
+        });
+    }
+  }, [isActive]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    let isMounted = true;
-
     if (isActive) {
-      // 1. Immediately silence and pause all other video elements in the document to prevent audio overlap
-      try {
-        const otherVideos = document.querySelectorAll('video');
-        otherVideos.forEach((v) => {
-          if (v !== video) {
-            v.pause();
-            v.muted = true;
-            v.volume = 0;
-          }
-        });
-      } catch {
-        // ignore
-      }
-
-      try {
-        video.playsInline = true;
-        (video as unknown as { webkitPlaysInline?: boolean }).webkitPlaysInline = true;
-        video.setAttribute('playsinline', 'true');
-        video.setAttribute('webkit-playsinline', 'true');
-        video.setAttribute('x5-playsinline', 'true');
-      } catch {
-        // ignore
-      }
-
-      // 2. Play active video with its sound state
-      const currentMuted = isGloballyMutedRef.current;
-      video.muted = currentMuted;
-      video.volume = currentMuted ? 0 : 1.0;
-
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            if (!isMounted) return;
-            setIsPlaying(true);
-            setIsBuffering(false);
-            if (!isGloballyMutedRef.current) {
-              video.muted = false;
-              video.volume = 1.0;
-            }
-          })
-          .catch((err) => {
-            if (!isMounted) return;
-            console.warn('Initial autoplay restriction handled, playing muted first:', err);
-            video.muted = true;
-            video
-              .play()
-              .then(() => {
-                if (!isMounted) return;
-                setIsPlaying(true);
-                setIsBuffering(false);
-                if (!isGloballyMutedRef.current) {
-                  video.muted = false;
-                  video.volume = 1.0;
-                }
-              })
-              .catch(() => {
-                if (!isMounted) return;
-                setIsPlaying(false);
-              });
-          });
-      }
+      attemptPlay();
     } else {
       // 3. When scrolled away, immediately pause and completely mute sound with zero audio bleed!
       video.pause();
@@ -433,14 +432,13 @@ export const ReelCard: React.FC<ReelCardProps> = ({
     }
 
     return () => {
-      isMounted = false;
       if (video) {
         video.pause();
         video.muted = true;
         video.volume = 0;
       }
     };
-  }, [isActive]);
+  }, [isActive, videoSrc, attemptPlay]);
 
   const [volumeIndicator, setVolumeIndicator] = useState<'muted' | 'unmuted' | null>(null);
 
@@ -580,10 +578,35 @@ export const ReelCard: React.FC<ReelCardProps> = ({
         onLoadedMetadata={() => {
           setIsBuffering(false);
           setHasRenderedFrame(true);
+          if (isActive && videoRef.current?.paused) {
+            attemptPlay();
+          }
         }}
         onLoadedData={() => {
           setIsBuffering(false);
           setHasRenderedFrame(true);
+          if (isActive && videoRef.current?.paused) {
+            attemptPlay();
+          }
+        }}
+        onCanPlay={() => {
+          setIsBuffering(false);
+          if (!isActive) {
+            if (videoRef.current) {
+              videoRef.current.pause();
+              videoRef.current.muted = true;
+              videoRef.current.volume = 0;
+            }
+            setIsPlaying(false);
+            return;
+          }
+          if (videoRef.current) {
+            videoRef.current.muted = isGloballyMuted;
+            videoRef.current.volume = isGloballyMuted ? 0 : 1.0;
+            if (videoRef.current.paused) {
+              attemptPlay();
+            }
+          }
         }}
         onTimeUpdate={() => {
           if (isBuffering) setIsBuffering(false);
@@ -637,22 +660,6 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           setIsPlaying(true);
           setIsBuffering(false);
           setHasRenderedFrame(true);
-          if (videoRef.current) {
-            videoRef.current.muted = isGloballyMuted;
-            videoRef.current.volume = isGloballyMuted ? 0 : 1.0;
-          }
-        }}
-        onCanPlay={() => {
-          setIsBuffering(false);
-          if (!isActive) {
-            if (videoRef.current) {
-              videoRef.current.pause();
-              videoRef.current.muted = true;
-              videoRef.current.volume = 0;
-            }
-            setIsPlaying(false);
-            return;
-          }
           if (videoRef.current) {
             videoRef.current.muted = isGloballyMuted;
             videoRef.current.volume = isGloballyMuted ? 0 : 1.0;
@@ -835,31 +842,6 @@ export const ReelCard: React.FC<ReelCardProps> = ({
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] opacity-70 drop-shadow">{reel.createdAt}</span>
-              {reel.storageProvider === 'akai.in' && (
-                <a
-                  href={reel.archiveChannelUrl || 'https://archive.org/details/@mehndi_babu/uploads'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-pink-500/20 text-pink-300 border border-pink-500/40 hover:bg-pink-500 hover:text-white transition-colors flex items-center gap-1"
-                  title="Hosted on Cloud Media Server"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
-                  <span>Cloud MP4</span>
-                </a>
-              )}
-              {reel.storageProvider === 'archive.org' && (
-                <a
-                  href={reel.archiveChannelUrl || 'https://archive.org/details/@mehndi_babu/uploads'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500 hover:text-black transition-colors"
-                  title="View public uploads on Archive.org"
-                >
-                  📦 Archive.org
-                </a>
-              )}
             </div>
           </div>
 

@@ -220,6 +220,7 @@ export interface MusicTrack {
   audioUrl: string;
   duration: string;
   coverUrl?: string;
+  category?: 'hindi' | 'bhojpuri' | 'dialogue' | 'all';
 }
 
 export type CameraFilterType = 'normal' | 'beauty' | 'vintage' | 'bw' | 'sepia' | 'cyberpunk';

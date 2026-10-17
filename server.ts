@@ -2,7 +2,11 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { Readable } from 'stream';
+import { execFile } from 'child_process';
+import util from 'util';
 import { createServer as createViteServer } from 'vite';
+
+const execFileAsync = util.promisify(execFile);
 
 const PORT = 3000;
 const app = express();
@@ -87,6 +91,76 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 }
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// 🎥 Video Duration & Trimming Engine (Strict 60-Second Short Form Enforcement)
+async function getVideoDuration(filePath: string): Promise<number> {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath,
+    ]);
+    const dur = parseFloat(stdout.trim());
+    return isNaN(dur) ? 0 : dur;
+  } catch (err) {
+    console.warn('ffprobe error:', err);
+    return 0;
+  }
+}
+
+async function enforceMaxDuration(filePath: string, maxSeconds = 60): Promise<{ trimmed: boolean; duration: number }> {
+  const initialDur = await getVideoDuration(filePath);
+  if (initialDur > 0 && initialDur <= maxSeconds + 0.5) {
+    return { trimmed: false, duration: initialDur };
+  }
+
+  const ext = path.extname(filePath) || '.mp4';
+  const tempOut = filePath + '.trimmed' + ext;
+  try {
+    // Attempt 1: Fast stream copy to preserve exact audio/video synchronization & bit-for-bit quality
+    try {
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-i', filePath,
+        '-t', String(maxSeconds),
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        tempOut,
+      ]);
+      const copyDur = await getVideoDuration(tempOut);
+      if (copyDur > 0 && copyDur <= maxSeconds + 0.5) {
+        fs.renameSync(tempOut, filePath);
+        return { trimmed: true, duration: copyDur };
+      }
+    } catch {
+      // Fall through to re-encode
+    }
+
+    // Attempt 2: Re-encode with libx264 and aac for guaranteed sync and compliance
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-i', filePath,
+      '-t', String(maxSeconds),
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-c:a', 'aac',
+      '-movflags', '+faststart',
+      tempOut,
+    ]);
+    const reencodeDur = await getVideoDuration(tempOut);
+    if (reencodeDur > 0 && reencodeDur <= maxSeconds + 1.0) {
+      fs.renameSync(tempOut, filePath);
+      return { trimmed: true, duration: reencodeDur };
+    }
+
+    if (fs.existsSync(tempOut)) try { fs.unlinkSync(tempOut); } catch {}
+    throw new Error(`Trimmed duration ${reencodeDur}s exceeds maximum allowed duration`);
+  } catch (err: any) {
+    if (fs.existsSync(tempOut)) try { fs.unlinkSync(tempOut); } catch {}
+    throw new Error(`Automatic trimming failed: ${err.message}`);
+  }
 }
 
 // High performance HTTP 206 Byte-Range streaming for mobile & web video players
@@ -641,10 +715,21 @@ app.post('/api/upload', async (req, res) => {
 
     const filePath = path.join(UPLOADS_DIR, cleanName);
     fs.writeFileSync(filePath, buffer);
+
+    // Strict maximum duration enforcement (<= 60s)
+    let trimInfo: { trimmed: boolean; duration: number };
+    try {
+      trimInfo = await enforceMaxDuration(filePath, 60);
+    } catch (durErr: any) {
+      if (fs.existsSync(filePath)) try { fs.unlinkSync(filePath); } catch {}
+      return res.status(400).json({ error: durErr.message || 'Video exceeds 60 seconds and trimming failed.' });
+    }
+    const finalBuffer = fs.readFileSync(filePath);
+
     try {
       const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
       if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
-      fs.writeFileSync(path.join(publicUploadsDir, cleanName), buffer);
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), finalBuffer);
     } catch (e) {
       // ignore
     }
@@ -690,7 +775,7 @@ app.post('/api/upload', async (req, res) => {
     }
 
     // Mirror to Internet Archive (Archive.org S3) in background for 100% free unlimited storage
-    mirrorToArchiveOrg(buffer, cleanName, incomingReel?.caption, incomingReel?.username).then((archiveUrl) => {
+    mirrorToArchiveOrg(finalBuffer, cleanName, incomingReel?.caption, incomingReel?.username).then((archiveUrl) => {
       if (archiveUrl && incomingReel) {
         const target = cloudReels.find((r) => r.id === incomingReel.id);
         if (target) {
@@ -706,8 +791,10 @@ app.post('/api/upload', async (req, res) => {
       publicUrl,
       localUrl,
       posterUrl,
-      sizeBytes: buffer.length,
+      sizeBytes: finalBuffer.length,
       streamUrl: publicUrl,
+      duration: trimInfo.duration,
+      trimmed: trimInfo.trimmed,
     });
   } catch (error: any) {
     console.error('Upload processing error:', error);
@@ -732,14 +819,25 @@ app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octe
     const cleanName = `reel_${timestamp}_${rawFilename.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
     const filePath = path.join(UPLOADS_DIR, cleanName);
     fs.writeFileSync(filePath, rawBuffer);
+
+    // Strict maximum duration enforcement (<= 60s)
+    let trimInfo: { trimmed: boolean; duration: number };
+    try {
+      trimInfo = await enforceMaxDuration(filePath, 60);
+    } catch (durErr: any) {
+      if (fs.existsSync(filePath)) try { fs.unlinkSync(filePath); } catch {}
+      return res.status(400).json({ error: durErr.message || 'Video exceeds 60 seconds and trimming failed.' });
+    }
+    const finalBuffer = fs.readFileSync(filePath);
+
     try {
       const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
       if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
-      fs.writeFileSync(path.join(publicUploadsDir, cleanName), rawBuffer);
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), finalBuffer);
     } catch (e) {}
 
     // Mirror to Internet Archive (Archive.org S3) in background for 100% free unlimited storage
-    mirrorToArchiveOrg(rawBuffer, cleanName).then((archiveUrl) => {
+    mirrorToArchiveOrg(finalBuffer, cleanName).then((archiveUrl) => {
       if (archiveUrl) {
         console.log('Binary upload mirrored to Archive.org:', archiveUrl);
       }
@@ -754,7 +852,9 @@ app.post('/api/upload/binary', express.raw({ type: ['video/*', 'application/octe
       publicUrl,
       localUrl,
       streamUrl: publicUrl,
-      sizeBytes: rawBuffer.length,
+      sizeBytes: finalBuffer.length,
+      duration: trimInfo.duration,
+      trimmed: trimInfo.trimmed,
     });
   } catch (err: any) {
     console.error('Binary upload error:', err);
@@ -780,37 +880,44 @@ app.post('/api/archive/upload', express.raw({ type: ['video/*', 'application/oct
     const cleanName = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
     const filePath = path.join(UPLOADS_DIR, cleanName);
     fs.writeFileSync(filePath, rawBuffer);
+
+    // Strict maximum duration enforcement (<= 60s)
+    let trimInfo: { trimmed: boolean; duration: number };
+    try {
+      trimInfo = await enforceMaxDuration(filePath, 60);
+    } catch (durErr: any) {
+      if (fs.existsSync(filePath)) try { fs.unlinkSync(filePath); } catch {}
+      return res.status(400).json({ error: durErr.message || 'Video exceeds 60 seconds and trimming failed.' });
+    }
+    const finalBuffer = fs.readFileSync(filePath);
+
     try {
       const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
       if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
-      fs.writeFileSync(path.join(publicUploadsDir, cleanName), rawBuffer);
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), finalBuffer);
     } catch {}
 
     const localUrl = `/uploads/${cleanName}`;
     const s3TargetUrl = `https://s3.us.archive.org/${itemIdentifier}/${cleanName}`;
     const archiveDownloadUrl = `https://archive.org/download/${itemIdentifier}/${cleanName}`;
 
-    console.log(`[Archive S3] Executing PUT to ${s3TargetUrl}...`);
-
-    // 2. Perform Archive.org S3 PUT with required headers
-    try {
-      const archiveRes = await fetch(s3TargetUrl, {
-        method: 'PUT',
-        headers: {
-          'authorization': 'LOW vtpRTNUZwvYdbqtY:kCT6Q5WaKrgKGSUE',
-          'x-archive-auto-make-bucket': '1',
-          'x-archive-meta-mediatype': 'movies',
-          'x-archive-meta-collection': 'opensource_movies',
-          'x-archive-meta-title': dynamicTitle,
-          'Content-Type': mimeType,
-        },
-        body: rawBuffer,
-      });
-
-      console.log(`[Archive S3] Status: ${archiveRes.status} ${archiveRes.statusText}`);
-    } catch (archiveErr) {
-      console.warn('[Archive S3] Direct PUT notice (background processing):', archiveErr);
-    }
+    // Perform Archive.org S3 PUT in background asynchronously so upload response is fast (1-2s)
+    fetch(s3TargetUrl, {
+      method: 'PUT',
+      headers: {
+        'authorization': 'LOW vtpRTNUZwvYdbqtY:kCT6Q5WaKrgKGSUE',
+        'x-archive-auto-make-bucket': '1',
+        'x-archive-meta-mediatype': 'movies',
+        'x-archive-meta-collection': 'opensource_movies',
+        'x-archive-meta-title': dynamicTitle,
+        'Content-Type': mimeType,
+      },
+      body: finalBuffer,
+    }).then((archiveRes) => {
+      console.log(`[Archive S3 Background] Status: ${archiveRes.status} ${archiveRes.statusText}`);
+    }).catch((archiveErr) => {
+      console.warn('[Archive S3 Background] Direct PUT notice:', archiveErr);
+    });
 
     res.json({
       success: true,
@@ -820,11 +927,152 @@ app.post('/api/archive/upload', express.raw({ type: ['video/*', 'application/oct
       s3Url: s3TargetUrl,
       localUrl,
       streamUrl: localUrl,
-      sizeBytes: rawBuffer.length,
+      sizeBytes: finalBuffer.length,
+      duration: trimInfo.duration,
+      trimmed: trimInfo.trimmed,
     });
   } catch (err: any) {
     console.error('Archive upload processing error:', err);
     res.status(500).json({ error: err.message || 'Failed to upload to Archive.org' });
+  }
+});
+
+// Dedicated Client Video Trimming Endpoint (Strict <= 60 seconds with synchronized audio)
+app.post('/api/video/trim-client', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '200mb' }), async (req, res) => {
+  const tempIn = path.join(UPLOADS_DIR, `temp_trim_in_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.mp4`);
+  const tempOut = path.join(UPLOADS_DIR, `temp_trim_out_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.mp4`);
+  try {
+    const rawBuffer = req.body;
+    if (!rawBuffer || rawBuffer.length === 0) {
+      return res.status(400).json({ error: 'No video data provided for trimming' });
+    }
+    fs.writeFileSync(tempIn, rawBuffer);
+
+    const initialDur = await getVideoDuration(tempIn);
+    console.log(`[trim-client] Received video of duration: ${initialDur.toFixed(2)}s`);
+
+    if (initialDur > 0 && initialDur <= 60.5) {
+      // Already compliant under 60 seconds
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('x-video-duration', String(initialDur));
+      const s = fs.createReadStream(tempIn);
+      s.on('close', () => {
+        try { fs.unlinkSync(tempIn); } catch {}
+      });
+      return s.pipe(res);
+    }
+
+    // Must trim to <= 60 seconds
+    let trimmed = false;
+    // Attempt 1: Fast stream copy to preserve sync
+    try {
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-i', tempIn,
+        '-t', '60',
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        tempOut,
+      ]);
+      const copyDur = await getVideoDuration(tempOut);
+      if (copyDur > 0 && copyDur <= 60.5) {
+        trimmed = true;
+      }
+    } catch (e) {
+      // Fall through to transcode
+    }
+
+    if (!trimmed) {
+      await execFileAsync('ffmpeg', [
+        '-y',
+        '-i', tempIn,
+        '-t', '60',
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-c:a', 'aac',
+        '-movflags', '+faststart',
+        tempOut,
+      ]);
+      const transcodeDur = await getVideoDuration(tempOut);
+      if (transcodeDur > 0 && transcodeDur <= 60.5) {
+        trimmed = true;
+      }
+    }
+
+    if (!trimmed || !fs.existsSync(tempOut)) {
+      try { fs.unlinkSync(tempIn); } catch {}
+      try { fs.unlinkSync(tempOut); } catch {}
+      return res.status(400).json({ error: 'Failed to trim video to 60 seconds.' });
+    }
+
+    const verifiedDur = await getVideoDuration(tempOut);
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('x-video-duration', String(verifiedDur));
+    const s = fs.createReadStream(tempOut);
+    s.on('close', () => {
+      try { fs.unlinkSync(tempIn); } catch {}
+      try { fs.unlinkSync(tempOut); } catch {}
+    });
+    s.pipe(res);
+  } catch (err: any) {
+    try { fs.unlinkSync(tempIn); } catch {}
+    try { fs.unlinkSync(tempOut); } catch {}
+    console.error('trim-client error:', err);
+    res.status(500).json({ error: err.message || 'Trimming failed' });
+  }
+});
+
+// Dedicated Process & Trim Remote Video URL Endpoint
+app.post('/api/video/process-url', async (req, res) => {
+  const { url } = req.body;
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: 'Missing video URL' });
+  }
+
+  const cleanUrl = url.trim();
+  const timestamp = Date.now();
+  const randomHex = Math.random().toString(36).substring(2, 8);
+  const cleanName = `url_reel_${timestamp}_${randomHex}.mp4`;
+  const filePath = path.join(UPLOADS_DIR, cleanName);
+
+  try {
+    const remoteRes = await fetch(cleanUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MS-Shorts-VIP/2.0',
+      },
+      signal: AbortSignal.timeout(30000), // 30s timeout
+    });
+
+    if (!remoteRes.ok) {
+      return res.status(400).json({ error: `Failed to fetch remote video (HTTP ${remoteRes.status})` });
+    }
+
+    const arrayBuf = await remoteRes.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+    fs.writeFileSync(filePath, buf);
+
+    // Enforce 60s max duration strictly with ffmpeg/ffprobe
+    const trimInfo = await enforceMaxDuration(filePath, 60);
+    const finalBuf = fs.readFileSync(filePath);
+
+    try {
+      const publicUploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(publicUploadsDir)) fs.mkdirSync(publicUploadsDir, { recursive: true });
+      fs.writeFileSync(path.join(publicUploadsDir, cleanName), finalBuf);
+    } catch {}
+
+    const localUrl = `/uploads/${cleanName}`;
+    res.json({
+      success: true,
+      videoUrl: localUrl,
+      localUrl,
+      duration: trimInfo.duration,
+      trimmed: trimInfo.trimmed,
+    });
+  } catch (err: any) {
+    if (fs.existsSync(filePath)) try { fs.unlinkSync(filePath); } catch {}
+    console.error('process-url error:', err);
+    res.status(400).json({ error: `Failed to process remote video URL: ${err.message}` });
   }
 });
 

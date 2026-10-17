@@ -78,182 +78,96 @@ export function generateArchiveIdentifier(prefix: string = 'msshortsvip'): strin
 }
 
 /**
- * Step 1: Video Optimization before Upload
- * Checks video dimensions and bitrates; if video is larger than 720p or > 2.5 Mbps,
- * compresses it via Canvas & MediaRecorder to 720p at ~2.2 Mbps with faststart buffering.
+ * Step 1: Video Verification & Auto-Trim to 60 Seconds
+ * Strictly ensures all uploaded videos do not exceed 60 seconds with synchronized audio.
  */
 export async function optimizeVideoBeforeUpload(
   fileOrBlob: File | Blob,
   onProgress?: ArchiveUploadProgressCallback
 ): Promise<{ blob: Blob; mimeType: string }> {
-  // If browser doesn't support MediaRecorder or Canvas, pass through original
-  if (typeof window === 'undefined' || !window.MediaRecorder || !window.HTMLCanvasElement) {
-    return { blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' };
+  const mimeType = fileOrBlob.type || 'video/mp4';
+
+  // Check video duration via HTML5 Video element
+  let duration = 0;
+  try {
+    duration = await new Promise<number>((resolve) => {
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      const u = URL.createObjectURL(fileOrBlob);
+      v.src = u;
+      v.onloadedmetadata = () => {
+        const d = v.duration;
+        URL.revokeObjectURL(u);
+        resolve(isNaN(d) ? 0 : d);
+      };
+      v.onerror = () => {
+        URL.revokeObjectURL(u);
+        resolve(0);
+      };
+      setTimeout(() => {
+        URL.revokeObjectURL(u);
+        resolve(0);
+      }, 3000);
+    });
+  } catch {
+    duration = 0;
   }
 
-  // If the file is already small (under 3MB), pass through directly to avoid generational loss
-  if (fileOrBlob.size < 3 * 1024 * 1024) {
+  // If video exceeds 60 seconds, trim to first 60 seconds via server ffmpeg engine
+  if (duration > 60.5) {
     if (onProgress) {
       onProgress({
-        percentage: 15,
-        loadedBytes: fileOrBlob.size,
+        percentage: 10,
+        loadedBytes: 0,
         totalBytes: fileOrBlob.size,
         stage: 'optimizing',
-        message: 'Video bitrate verified (optimal for instant buffering)',
+        message: `Video is ${Math.round(duration)}s. Automatically trimming to first 60s...`,
       });
     }
-    return { blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' };
+
+    try {
+      const trimRes = await fetch('/api/video/trim-client', {
+        method: 'POST',
+        headers: { 'Content-Type': mimeType },
+        body: fileOrBlob,
+      });
+
+      if (!trimRes.ok) {
+        throw new Error(`Trimming service returned status ${trimRes.status}`);
+      }
+
+      const trimmedBlob = await trimRes.blob();
+      if (onProgress) {
+        onProgress({
+          percentage: 20,
+          loadedBytes: trimmedBlob.size,
+          totalBytes: trimmedBlob.size,
+          stage: 'optimizing',
+          message: 'Video trimmed to 60s with synchronized audio! 🚀',
+        });
+      }
+      return { blob: trimmedBlob, mimeType: 'video/mp4' };
+    } catch (err: any) {
+      console.warn('Trim service error:', err);
+      throw new Error(`Failed to trim video to 60 seconds: ${err.message || 'Error'}`);
+    }
   }
 
   if (onProgress) {
     onProgress({
-      percentage: 5,
-      loadedBytes: 0,
+      percentage: 15,
+      loadedBytes: fileOrBlob.size,
       totalBytes: fileOrBlob.size,
       stage: 'optimizing',
-      message: 'Optimizing video for 720p instant buffer streaming...',
+      message: 'Video duration verified (<= 60s). Preparing upload...',
     });
   }
 
-  return new Promise<{ blob: Blob; mimeType: string }>((resolve) => {
-    try {
-      const video = document.createElement('video');
-      video.muted = true;
-      video.playsInline = true;
-      const objectUrl = URL.createObjectURL(fileOrBlob);
-      video.src = objectUrl;
-
-      // Timeout fallback: if compression takes longer than 8 seconds, pass through original
-      const timeout = setTimeout(() => {
-        URL.revokeObjectURL(objectUrl);
-        resolve({ blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' });
-      }, 8000);
-
-      video.onloadedmetadata = () => {
-        let width = video.videoWidth || 720;
-        let height = video.videoHeight || 1280;
-
-        // Scale down to max 720p width/height maintaining aspect ratio
-        const maxDimension = 1280;
-        if (width > maxDimension || height > maxDimension) {
-          const ratio = Math.min(maxDimension / width, maxDimension / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-
-        // Even dimensions required for H.264
-        width = width % 2 === 0 ? width : width - 1;
-        height = height % 2 === 0 ? height : height - 1;
-
-        // Choose best supported MIME type with 2.2 Mbps target bitrate
-        let chosenMime = 'video/mp4';
-        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E,mp4a.40.2')) {
-          chosenMime = 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
-        } else if (MediaRecorder.isTypeSupported('video/mp4')) {
-          chosenMime = 'video/mp4';
-        } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
-          chosenMime = 'video/webm;codecs=vp8,opus';
-        } else if (MediaRecorder.isTypeSupported('video/webm')) {
-          chosenMime = 'video/webm';
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-
-        if (!ctx) {
-          clearTimeout(timeout);
-          URL.revokeObjectURL(objectUrl);
-          resolve({ blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' });
-          return;
-        }
-
-        const stream = canvas.captureStream(30);
-
-        // Capture original audio track if present
-        try {
-          const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-          const source = audioCtx.createMediaElementSource(video);
-          const dest = audioCtx.createMediaStreamDestination();
-          source.connect(dest);
-          dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
-        } catch {
-          // Ignore audio capture fallback
-        }
-
-        // Target bitrate: 2.2 Mbps (2,200,000 bps)
-        const targetBitrate = 2200000;
-        let mediaRecorder: MediaRecorder;
-        try {
-          mediaRecorder = new MediaRecorder(stream, {
-            mimeType: chosenMime,
-            videoBitsPerSecond: targetBitrate,
-          });
-        } catch {
-          clearTimeout(timeout);
-          URL.revokeObjectURL(objectUrl);
-          resolve({ blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' });
-          return;
-        }
-
-        const chunks: Blob[] = [];
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
-
-        mediaRecorder.onstop = () => {
-          clearTimeout(timeout);
-          URL.revokeObjectURL(objectUrl);
-          const finalBlob = new Blob(chunks, { type: chosenMime.split(';')[0] });
-          if (onProgress) {
-            onProgress({
-              percentage: 20,
-              loadedBytes: finalBlob.size,
-              totalBytes: finalBlob.size,
-              stage: 'optimizing',
-              message: `Optimization complete (${(finalBlob.size / (1024 * 1024)).toFixed(1)} MB, 720p @ 2.2Mbps)`,
-            });
-          }
-          resolve({ blob: finalBlob, mimeType: chosenMime.split(';')[0] });
-        };
-
-        mediaRecorder.start(200);
-        video.play().catch(() => {
-          clearTimeout(timeout);
-          URL.revokeObjectURL(objectUrl);
-          resolve({ blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' });
-        });
-
-        // Draw loop
-        const drawFrame = () => {
-          if (video.paused || video.ended) {
-            if (mediaRecorder.state === 'recording') mediaRecorder.stop();
-            return;
-          }
-          ctx.drawImage(video, 0, 0, width, height);
-          requestAnimationFrame(drawFrame);
-        };
-        drawFrame();
-
-        video.onended = () => {
-          if (mediaRecorder.state === 'recording') mediaRecorder.stop();
-        };
-      };
-
-      video.onerror = () => {
-        clearTimeout(timeout);
-        URL.revokeObjectURL(objectUrl);
-        resolve({ blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' });
-      };
-    } catch {
-      resolve({ blob: fileOrBlob, mimeType: fileOrBlob.type || 'video/mp4' });
-    }
-  });
+  return { blob: fileOrBlob, mimeType };
 }
 
 /**
- * Step 2 & 3: Upload to Archive.org S3 API with real-time XMLHttpRequest progress
+ * Step 2 & 3: Upload to Video Storage Engine with real-time progress stream
  */
 export async function uploadToArchiveOrgS3(
   fileOrBlob: File | Blob,
@@ -261,7 +175,7 @@ export async function uploadToArchiveOrgS3(
 ): Promise<ArchiveUploadResult> {
   const { title, caption, username, onProgress } = options;
 
-  // 1. Optimize video
+  // 1. Optimize / Trim video if > 60s
   const { blob: optimizedBlob, mimeType } = await optimizeVideoBeforeUpload(fileOrBlob, onProgress);
 
   const timestamp = Date.now();
@@ -269,83 +183,13 @@ export async function uploadToArchiveOrgS3(
   const ext = mimeType.includes('webm') ? 'webm' : 'mp4';
   const filename = `reel_${timestamp}.${ext}`;
 
-  // S3 Target URL
-  const s3Url = `${ARCHIVE_S3_CONFIG.s3Host}/${itemIdentifier}/${filename}`;
-  // Direct Download / Fast Streaming URL
-  const archiveDownloadUrl = `https://archive.org/download/${itemIdentifier}/${filename}`;
-
   const cleanTitle = (caption || title || 'MS Shorts VIP Reel')
     .replace(/[^\w\s\d.,!?#-]/gi, '')
     .trim()
     .substring(0, 100) || 'MS Shorts VIP Reel';
 
-  // 2. Perform upload via XMLHttpRequest with real-time progress stream
-  return new Promise<ArchiveUploadResult>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-
-    // Track upload progress
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) {
-        // Map upload progress from 20% to 95%
-        const uploadPercent = Math.round((event.loaded / event.total) * 75) + 20;
-        onProgress({
-          percentage: Math.min(95, uploadPercent),
-          loadedBytes: event.loaded,
-          totalBytes: event.total,
-          stage: 'uploading',
-          message: `Uploading to Internet Archive S3 (${Math.round((event.loaded / event.total) * 100)}%)...`,
-        });
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        if (onProgress) {
-          onProgress({
-            percentage: 100,
-            loadedBytes: optimizedBlob.size,
-            totalBytes: optimizedBlob.size,
-            stage: 'completed',
-            message: 'Video successfully saved to Internet Archive permanent storage! 🚀',
-          });
-        }
-        resolve({
-          success: true,
-          itemIdentifier,
-          filename,
-          archiveDownloadUrl,
-          s3Url,
-          optimizedSizeBytes: optimizedBlob.size,
-        });
-      } else {
-        // If direct client S3 upload encounters a CORS or network restriction,
-        // fall back smoothly through the server-side Archive.org proxy route!
-        console.warn(`Direct S3 PUT status ${xhr.status}. Falling back to server-side Archive proxy...`);
-        uploadViaServerArchiveProxy(optimizedBlob, filename, itemIdentifier, cleanTitle, username, onProgress)
-          .then(resolve)
-          .catch(reject);
-      }
-    };
-
-    xhr.onerror = () => {
-      console.warn('Direct S3 PUT network error. Falling back to server-side Archive proxy...');
-      uploadViaServerArchiveProxy(optimizedBlob, filename, itemIdentifier, cleanTitle, username, onProgress)
-        .then(resolve)
-        .catch(reject);
-    };
-
-    xhr.open('PUT', s3Url, true);
-
-    // Required Archive.org S3 headers
-    xhr.setRequestHeader('authorization', `LOW ${ARCHIVE_S3_CONFIG.accessKey}:${ARCHIVE_S3_CONFIG.secretKey}`);
-    xhr.setRequestHeader('x-archive-auto-make-bucket', '1');
-    xhr.setRequestHeader('x-archive-meta-mediatype', 'movies');
-    xhr.setRequestHeader('x-archive-meta-collection', ARCHIVE_S3_CONFIG.collection);
-    xhr.setRequestHeader('x-archive-meta-title', cleanTitle);
-    xhr.setRequestHeader('Content-Type', mimeType);
-
-    xhr.send(optimizedBlob);
-  });
+  // 2. Perform direct upload to server storage node with real-time XMLHttpRequest progress
+  return uploadViaServerArchiveProxy(optimizedBlob, filename, itemIdentifier, cleanTitle, username, onProgress);
 }
 
 /**

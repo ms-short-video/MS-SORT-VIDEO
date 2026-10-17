@@ -3,6 +3,7 @@ import { MusicTrack, CameraFilterType } from '../types';
 import { CAMERA_FILTERS } from '../data/mockData';
 import { blobToDataUrl } from '../utils/localVideoStore';
 import { generateVideoThumbnail } from '../utils/videoUtils';
+import { SoundPickerModal } from './SoundPickerModal';
 import {
   X,
   Camera,
@@ -45,6 +46,7 @@ export const CameraRecorderModal: React.FC<CameraRecorderModalProps> = ({
   const [selectedFilter, setSelectedFilter] = useState<CameraFilterType>('beauty');
   const [selectedTrack, setSelectedTrack] = useState<MusicTrack | null>(musicTracks[0] || null);
   const [maxDuration, setMaxDuration] = useState<15 | 30>(15);
+  const [isSoundPickerOpen, setIsSoundPickerOpen] = useState<boolean>(false);
 
   // Sync initialSongName if provided (e.g. from "Use Sound" click on any reel)
   useEffect(() => {
@@ -261,28 +263,17 @@ export const CameraRecorderModal: React.FC<CameraRecorderModalProps> = ({
           </button>
 
           {/* Audio Music Selector Button */}
-          <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/60 border border-white/20 backdrop-blur-md">
-            <Music className="w-4 h-4 text-pink-400 animate-pulse" />
-            <select
-              value={selectedTrack?.id || ''}
-              onChange={(e) => {
-                const tr = musicTracks.find((t) => t.id === e.target.value);
-                if (tr) setSelectedTrack(tr);
-              }}
-              className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer max-w-[140px] truncate"
-            >
-              {selectedTrack && !musicTracks.some((t) => t.id === selectedTrack.id) && (
-                <option value={selectedTrack.id} className="bg-slate-900 text-white font-bold">
-                  ✨ 🎵 {selectedTrack.title} (Selected Sound)
-                </option>
-              )}
-              {musicTracks.map((tr) => (
-                <option key={tr.id} value={tr.id} className="bg-slate-900 text-white">
-                  🎵 {tr.title} ({tr.duration})
-                </option>
-              ))}
-            </select>
-          </div>
+          <button
+            type="button"
+            onClick={() => setIsSoundPickerOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/60 border border-white/20 hover:border-pink-500/60 backdrop-blur-md cursor-pointer transition-all active:scale-95 group max-w-[170px]"
+            title="साउंड व म्यूजिक लाइब्रेरी खोलें"
+          >
+            <Music className="w-3.5 h-3.5 text-pink-400 group-hover:text-pink-300 animate-pulse shrink-0" />
+            <span className="text-[11px] font-bold text-white truncate">
+              {selectedTrack ? selectedTrack.title : 'साउंड चुनें'}
+            </span>
+          </button>
 
           {/* Flip Camera Facing Mode */}
           <button
@@ -485,6 +476,15 @@ export const CameraRecorderModal: React.FC<CameraRecorderModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Sound / Music Picker Modal */}
+      <SoundPickerModal
+        isOpen={isSoundPickerOpen}
+        onClose={() => setIsSoundPickerOpen(false)}
+        selectedTrackId={selectedTrack?.id}
+        onSelectTrack={(track) => setSelectedTrack(track)}
+        customTracks={musicTracks}
+      />
     </div>
   );
 };

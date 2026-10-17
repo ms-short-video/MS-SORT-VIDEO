@@ -226,7 +226,7 @@ export function App() {
       ownerUid: 'google-user-mehndibabu84',
       uploaderId: 'google-user-mehndibabu84',
       uploaderEmail: 'mehndibabu84@gmail.com',
-      caption: 'New reel uploaded synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+      caption: 'New video reel 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
       category: 'music',
       hashtags: ['#Viral', '#MSShortsVIP', '#MehndiBabu'],
       songName: 'Original Audio - Mehndi Babu',
@@ -1075,7 +1075,7 @@ export function App() {
           ownerUid: currentUid,
           uploaderId: currentUid,
           uploaderEmail: authUser.email,
-          caption: caption || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+          caption: caption || 'New video reel 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
           category: category || 'music',
           hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
           songName: songName || `Original Audio - ${currentUsername}`,
@@ -1087,7 +1087,7 @@ export function App() {
           isUserUploaded: true,
           isVip: authUser?.isVip || false,
           vipLevel: authUser?.vipLevel || 0,
-          storageProvider: 'archive.org',
+          storageProvider: 'direct',
           createdAt: 'Just now',
         };
 
@@ -1110,7 +1110,7 @@ export function App() {
           'archive_sync',
           currentUsername,
           currentAvatar,
-          '⚡ Video uploaded & saved permanently to Internet Archive S3!',
+          '⚡ Video uploaded and published successfully!',
           permanentReelId
         );
       } catch (uploadErr) {
@@ -1134,7 +1134,7 @@ export function App() {
             ownerUid: currentUid,
             uploaderId: currentUid,
             uploaderEmail: authUser.email,
-            caption: caption || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+            caption: caption || 'New video reel 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
             category: category || 'music',
             hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
             songName: songName || `Original Audio - ${currentUsername}`,
@@ -1146,7 +1146,7 @@ export function App() {
             isUserUploaded: true,
             isVip: authUser?.isVip || false,
             vipLevel: authUser?.vipLevel || 0,
-            storageProvider: 'archive.org',
+            storageProvider: 'direct',
             createdAt: 'Just now',
           };
 
@@ -1178,7 +1178,7 @@ export function App() {
         ownerUid: currentUid,
         uploaderId: currentUid,
         uploaderEmail: authUser.email,
-        caption: caption || 'New reel uploaded & synced to free unlimited cloud! 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
+        caption: caption || 'New video reel 🔥🚀 #Viral #MSShortsVIP #MehndiBabu',
         category: category || 'music',
         hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
         songName: songName || `Original Audio - ${currentUsername}`,

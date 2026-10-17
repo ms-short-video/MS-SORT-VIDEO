@@ -1,6 +1,6 @@
 import React from 'react';
 import { FeedCategoryFilter, ReelCategory, UserTasteProfile } from '../types';
-import { Sparkles, Music, Laugh, Flame, Heart, Zap, Users, SlidersHorizontal } from 'lucide-react';
+import { Sparkles, Heart, Zap, Users, SlidersHorizontal } from 'lucide-react';
 
 interface FeedCategoryBarProps {
   activeCategory: FeedCategoryFilter;
@@ -18,9 +18,6 @@ interface CategoryItem {
 
 const CATEGORIES: CategoryItem[] = [
   { id: 'for-you', label: 'For You', hindiLabel: '✨ आपके लिए', icon: Sparkles },
-  { id: 'music', label: 'Music', hindiLabel: '🎵 गाने', icon: Music },
-  { id: 'comedy', label: 'Comedy', hindiLabel: '😂 कॉमेडी', icon: Laugh },
-  { id: 'dance', label: 'Dance', hindiLabel: '💃 डांस', icon: Flame },
   { id: 'shayari', label: 'Shayari', hindiLabel: '💖 शायरी', icon: Heart },
   { id: 'viral', label: 'Viral', hindiLabel: '🔥 वायरल', icon: Sparkles },
   { id: 'action', label: 'Action', hindiLabel: '🏎️ एक्शन', icon: Zap },
