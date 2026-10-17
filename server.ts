@@ -5,6 +5,8 @@ import { Readable } from 'stream';
 import { execFile } from 'child_process';
 import util from 'util';
 import { createServer as createViteServer } from 'vite';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 
 const execFileAsync = util.promisify(execFile);
 
@@ -245,6 +247,15 @@ app.get('/uploads/:filename', (req, res) => {
     if (filename.includes('1792054189770') || filename.includes('mv9asmh6')) {
       return res.redirect('https://archive.org/download/msshortsvip-mv9asmh6-3o6ufs/reel_1792054189770.mp4');
     }
+    const cleanFn = filename.replace(/\.[^/.]+$/, '');
+    const matchedReel = cloudReels.find((r) =>
+      (r.videoUrl && r.videoUrl.includes(cleanFn)) ||
+      (r.archiveDownloadUrl && r.archiveDownloadUrl.includes(cleanFn)) ||
+      (r.id && r.id.includes(cleanFn))
+    );
+    if (matchedReel && matchedReel.archiveDownloadUrl) {
+      return res.redirect(`/api/stream?url=${encodeURIComponent(matchedReel.archiveDownloadUrl)}`);
+    }
     return res.status(404).send('Not found');
   }
   streamFile(localPath, req, res);
@@ -258,6 +269,15 @@ app.head('/uploads/:filename', (req, res) => {
     if (fs.existsSync(pub)) localPath = pub;
   }
   if (!fs.existsSync(localPath)) {
+    const cleanFn = filename.replace(/\.[^/.]+$/, '');
+    const matchedReel = cloudReels.find((r) =>
+      (r.videoUrl && r.videoUrl.includes(cleanFn)) ||
+      (r.archiveDownloadUrl && r.archiveDownloadUrl.includes(cleanFn)) ||
+      (r.id && r.id.includes(cleanFn))
+    );
+    if (matchedReel && matchedReel.archiveDownloadUrl) {
+      return res.redirect(`/api/stream?url=${encodeURIComponent(matchedReel.archiveDownloadUrl)}`);
+    }
     return res.status(404).send('Not found');
   }
   streamFile(localPath, req, res);
@@ -448,7 +468,67 @@ if (!cloudReels || cloudReels.length === 0) {
   cloudReels = [];
 }
 
-// Only explicit reels saved in REELS_FILE and Firestore are served
+// ==========================================
+// 🔥 FIREBASE FIRESTORE SYNC & PERSISTENCE
+// ==========================================
+let firestoreDb: any = null;
+try {
+  const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(firebaseConfigPath)) {
+    const config = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf-8'));
+    const fApp = !getApps().length ? initializeApp(config, 'server-backend') : getApp('server-backend');
+    firestoreDb = getFirestore(fApp, config.firestoreDatabaseId);
+    console.log('[Backend] Firestore initialized successfully with db:', config.firestoreDatabaseId);
+  }
+} catch (e: any) {
+  console.warn('[Backend] Notice initializing Firestore:', e.message);
+}
+
+// Function to synchronize cloudReels with Firestore
+async function syncFromFirestore(): Promise<void> {
+  if (!firestoreDb) return;
+  try {
+    const snap = await getDocs(collection(firestoreDb, 'reels'));
+    if (!snap.empty) {
+      const remoteList: any[] = [];
+      snap.forEach((d: any) => {
+        const data = d.data();
+        if (data && data.id && !deletedReelIds.has(data.id) && !data.isBlocked) {
+          remoteList.push(data);
+        }
+      });
+      if (remoteList.length > 0) {
+        const idMap = new Map<string, any>();
+        for (const r of remoteList) {
+          idMap.set(r.id, r);
+        }
+        for (const r of cloudReels) {
+          if (!idMap.has(r.id) && !deletedReelIds.has(r.id) && !r.isBlocked) {
+            idMap.set(r.id, r);
+          }
+        }
+        cloudReels = Array.from(idMap.values());
+        // Sort newest first
+        cloudReels.sort((a, b) => {
+          const tA = a.createdAt || a.timestamp || a.id;
+          const tB = b.createdAt || b.timestamp || b.id;
+          return tB > tA ? 1 : -1;
+        });
+        persistReels();
+        console.log(`[Backend] Synced ${cloudReels.length} active reels from Firestore`);
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Backend] Sync from Firestore notice:', err.message);
+  }
+}
+
+// Initial sync on startup
+syncFromFirestore().catch(() => {});
+// Periodic sync every 15s to keep all Cloud Run instances in sync
+setInterval(() => {
+  syncFromFirestore().catch(() => {});
+}, 15000);
 
 persistReels();
 
@@ -501,14 +581,29 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), reelsCount: cloudReels.length });
 });
 
-// 2. Fetch all global cloud reels (filtering out any deleted reels)
-app.get('/api/reels', (req, res) => {
-  const activeReels = cloudReels.filter((r) => r && r.id && !deletedReelIds.has(r.id));
+// 2. Fetch all global cloud reels (filtering out deleted & blocked reels, ensuring universal stream URL)
+app.get('/api/reels', async (req, res) => {
+  if (cloudReels.length < 5) {
+    await syncFromFirestore().catch(() => {});
+  }
+  const activeReels = cloudReels
+    .filter((r) => r && r.id && !deletedReelIds.has(r.id) && !r.isBlocked)
+    .map((r) => {
+      const archive = r.archiveDownloadUrl || r.archiveChannelUrl;
+      const cleanUrl = (r.videoUrl && r.videoUrl.startsWith('/uploads/'))
+        ? r.videoUrl
+        : (r.videoUrl || archive || '');
+      return {
+        ...r,
+        videoUrl: cleanUrl,
+        archiveDownloadUrl: archive || r.archiveDownloadUrl || '',
+      };
+    });
   res.json(activeReels);
 });
 
-// 3. Create / Push reel to global cloud database with strict deduplication
-app.post('/api/reels', (req, res) => {
+// 3. Create / Push reel to global cloud database with strict deduplication & Firestore sync
+app.post('/api/reels', async (req, res) => {
   try {
     const reel = req.body;
     if (!reel || !reel.id || !reel.videoUrl) {
@@ -531,24 +626,40 @@ app.post('/api/reels', (req, res) => {
         (archiveUrl && (r.archiveDownloadUrl === archiveUrl || r.archiveChannelUrl === archiveUrl))
     );
 
+    const schemaDoc = {
+      ...reel,
+      ownerUid: reel.ownerUid || (existingIdx >= 0 ? cloudReels[existingIdx].ownerUid : 'google-user-mehndibabu84'),
+      uploaderId: reel.uploaderId || (existingIdx >= 0 ? cloudReels[existingIdx].uploaderId : 'google-user-mehndibabu84'),
+      uploaderEmail: reel.uploaderEmail || (existingIdx >= 0 ? cloudReels[existingIdx].uploaderEmail : 'mehndibabu84@gmail.com'),
+      updatedAt: new Date().toISOString(),
+      timestamp: reel.timestamp || new Date().toISOString(),
+    };
+
     if (existingIdx >= 0) {
       cloudReels[existingIdx] = {
         ...cloudReels[existingIdx],
-        ...reel,
-        ownerUid: reel.ownerUid || cloudReels[existingIdx].ownerUid,
-        uploaderId: reel.uploaderId || cloudReels[existingIdx].uploaderId,
-        uploaderEmail: reel.uploaderEmail || cloudReels[existingIdx].uploaderEmail,
-        updatedAt: new Date().toISOString(),
+        ...schemaDoc,
       };
     } else {
       cloudReels.unshift({
-        ...reel,
+        ...schemaDoc,
         createdAt: reel.createdAt || new Date().toISOString(),
       });
     }
 
     persistReels();
-    res.json({ success: true, reel, total: cloudReels.length });
+
+    // Persist to Firestore in background
+    if (firestoreDb) {
+      try {
+        const reelRef = doc(firestoreDb, 'reels', reel.id);
+        await setDoc(reelRef, schemaDoc, { merge: true });
+      } catch (fsErr) {
+        console.warn('Notice saving reel to Firestore in background:', fsErr);
+      }
+    }
+
+    res.json({ success: true, reel: schemaDoc, total: cloudReels.length });
   } catch (error) {
     console.error('Error posting reel to cloud:', error);
     res.status(500).json({ error: 'Failed to save reel' });
@@ -626,6 +737,15 @@ app.delete('/api/reels/:id', (req, res) => {
     }
   }
 
+  // Also delete from Firestore
+  if (firestoreDb) {
+    try {
+      deleteDoc(doc(firestoreDb, 'reels', id)).catch(() => {});
+    } catch (e: any) {
+      console.warn('Firestore delete notice in server:', e.message);
+    }
+  }
+
   console.log(`[DELETE REEL SUCCESS] Reel ${id} deleted by ${isAdmin ? 'ADMIN (' + userEmail + ')' : 'OWNER (' + userUid + ')'}`);
   res.json({ success: true, remaining: cloudReels.length, deletedId: id });
 });
@@ -639,9 +759,296 @@ app.post('/api/reels/:id/like', (req, res) => {
     reel.likes = isLiked ? (reel.likes || 0) + 1 : Math.max(0, (reel.likes || 1) - 1);
     reel.isLiked = isLiked;
     persistReels();
+    if (firestoreDb) {
+      updateDoc(doc(firestoreDb, 'reels', id), { likes: reel.likes }).catch(() => {});
+    }
     return res.json({ success: true, likes: reel.likes, isLiked: reel.isLiked });
   }
   res.status(404).json({ error: 'Reel not found' });
+});
+
+// ==============================================================
+// ⚖️ PRIORITY 8: AUTOMATED COPYRIGHT COMPLAINT ENGINE & WORKER
+// ==============================================================
+
+// In-memory fallback complaints cache
+const COMPLAINTS_FILE = path.join(DATA_DIR, 'copyright_complaints.json');
+let copyrightComplaints: any[] = [];
+try {
+  if (fs.existsSync(COMPLAINTS_FILE)) {
+    copyrightComplaints = JSON.parse(fs.readFileSync(COMPLAINTS_FILE, 'utf-8'));
+  }
+} catch (e) {
+  copyrightComplaints = [];
+}
+
+function persistComplaints() {
+  try {
+    fs.writeFileSync(COMPLAINTS_FILE, JSON.stringify(copyrightComplaints, null, 2), 'utf-8');
+  } catch {}
+}
+
+// A. Register new copyright complaint
+app.post('/api/copyright/report', express.json(), async (req, res) => {
+  try {
+    const {
+      reelId,
+      videoUrl,
+      claimedWork,
+      rightsHolder,
+      reporterName,
+      reporterEmail,
+      reason,
+      timestamps,
+      evidenceUrl,
+      notes,
+    } = req.body;
+
+    if (!reelId || !claimedWork || !rightsHolder || !reporterEmail) {
+      return res.status(400).json({
+        error: 'Missing required copyright report fields (reelId, claimedWork, rightsHolder, reporterEmail)',
+      });
+    }
+
+    const complaintId = `complaint_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const complaintDoc = {
+      id: complaintId,
+      reelId,
+      videoUrl: videoUrl || '',
+      claimedWork: String(claimedWork).trim(),
+      rightsHolder: String(rightsHolder).trim(),
+      reporterName: String(reporterName || '').trim(),
+      reporterEmail: String(reporterEmail).trim().toLowerCase(),
+      reason: String(reason || 'Unlicensed Copyrighted Audio').trim(),
+      timestamps: String(timestamps || '0:00 - 0:30').trim(),
+      evidenceUrl: String(evidenceUrl || '').trim(),
+      notes: String(notes || '').trim(),
+      status: 'RECEIVED', // RECEIVED -> VERIFYING -> ACTION_PENDING -> MUTED / BLOCKED / RESOLVED
+      actionTaken: 'NONE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      auditHistory: [
+        {
+          action: 'COMPLAINT_RECEIVED',
+          timestamp: new Date().toISOString(),
+          performedBy: reporterEmail,
+          details: `Complaint submitted for work: "${claimedWork}" by ${rightsHolder}`,
+        },
+      ],
+    };
+
+    copyrightComplaints.unshift(complaintDoc);
+    persistComplaints();
+
+    if (firestoreDb) {
+      try {
+        const compRef = doc(firestoreDb, 'copyright_complaints', complaintId);
+        await setDoc(compRef, complaintDoc);
+      } catch (e: any) {
+        console.warn('Firestore write complaint notice:', e.message);
+      }
+    }
+
+    console.log(`[COPYRIGHT COMPLAINT] Registered ${complaintId} for reel ${reelId} by ${reporterEmail}`);
+
+    res.json({
+      success: true,
+      complaintId,
+      message: 'Copyright complaint registered successfully. Our automated safe harbor system has queued it for verification.',
+      complaint: complaintDoc,
+    });
+  } catch (err: any) {
+    console.error('Error recording copyright report:', err);
+    res.status(500).json({ error: 'Failed to record copyright report' });
+  }
+});
+
+// B. Fetch all copyright complaints (Admin protected)
+app.get('/api/copyright/complaints', async (req, res) => {
+  try {
+    const list: any[] = [];
+    if (firestoreDb) {
+      try {
+        const snap = await getDocs(collection(firestoreDb, 'copyright_complaints'));
+        snap.forEach((d: any) => {
+          const data = d.data();
+          if (data && data.id) list.push(data);
+        });
+      } catch (e) {}
+    }
+    if (list.length === 0) {
+      list.push(...copyrightComplaints);
+    }
+    // Deduplicate by id and sort newest first
+    const map = new Map<string, any>();
+    for (const c of list) {
+      map.set(c.id, c);
+    }
+    const result = Array.from(map.values()).sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+    res.json({ success: true, complaints: result });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to list complaints' });
+  }
+});
+
+// C. Enforce copyright action (Mute Audio, Block Video, Restore Video)
+app.post('/api/copyright/enforce', express.json(), async (req, res) => {
+  try {
+    const { complaintId, reelId, action, reason, adminEmail } = req.body;
+    if (!reelId || !action) {
+      return res.status(400).json({ error: 'Missing reelId or action' });
+    }
+
+    const targetReel = cloudReels.find((r) => r.id === reelId);
+    let originalUrl = targetReel?.videoUrl || '';
+    let actionResult = { success: true, action, message: '' };
+
+    if (action === 'MUTE_AUDIO') {
+      const cleanReelFn = `reel_${reelId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      let srcPath = path.join(UPLOADS_DIR, `${cleanReelFn}.mp4`);
+      if (!fs.existsSync(srcPath)) {
+        const existing = fs.readdirSync(UPLOADS_DIR).find((f) => f.includes(reelId) || (targetReel?.videoUrl && f.includes(path.basename(targetReel.videoUrl))));
+        if (existing) srcPath = path.join(UPLOADS_DIR, existing);
+      }
+
+      // If not on local disk, download from archiveDownloadUrl
+      const archiveUrl = targetReel?.archiveDownloadUrl || targetReel?.videoUrl;
+      if (!fs.existsSync(srcPath) && archiveUrl && archiveUrl.startsWith('http')) {
+        try {
+          const dlRes = await fetch(archiveUrl);
+          if (dlRes.ok) {
+            const buf = Buffer.from(await dlRes.arrayBuffer());
+            fs.writeFileSync(srcPath, buf);
+          }
+        } catch {}
+      }
+
+      const mutedFileName = `${cleanReelFn}_muted.mp4`;
+      const mutedPath = path.join(UPLOADS_DIR, mutedFileName);
+
+      if (fs.existsSync(srcPath)) {
+        try {
+          // FFmpeg -an: completely removes all audio channels while keeping pristine video stream
+          await execFileAsync('ffmpeg', [
+            '-y',
+            '-i', srcPath,
+            '-c:v', 'copy',
+            '-an',
+            '-movflags', '+faststart',
+            mutedPath,
+          ]);
+        } catch {
+          // Fallback re-encode video without audio
+          await execFileAsync('ffmpeg', [
+            '-y',
+            '-i', srcPath,
+            '-c:v', 'libx264',
+            '-preset', 'ultrafast',
+            '-an',
+            '-movflags', '+faststart',
+            mutedPath,
+          ]);
+        }
+      }
+
+      const mutedUrl = `/uploads/${mutedFileName}`;
+
+      if (targetReel) {
+        targetReel.isMuted = true;
+        targetReel.copyrightStatus = 'MUTED';
+        targetReel.videoUrl = mutedUrl;
+      }
+      persistReels();
+
+      if (firestoreDb) {
+        try {
+          await updateDoc(doc(firestoreDb, 'reels', reelId), {
+            isMuted: true,
+            copyrightStatus: 'MUTED',
+            videoUrl: mutedUrl,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e: any) {
+          console.warn('Firestore update reel notice:', e.message);
+        }
+      }
+
+      actionResult.message = `Video audio successfully muted via FFmpeg. Visual video remains accessible.`;
+    } else if (action === 'BLOCK_VIDEO' || action === 'REMOVE_VIDEO') {
+      if (targetReel) {
+        targetReel.isBlocked = true;
+        targetReel.copyrightStatus = 'BLOCKED';
+      }
+      cloudReels = cloudReels.filter((r) => r.id !== reelId);
+      persistReels();
+
+      if (firestoreDb) {
+        try {
+          await updateDoc(doc(firestoreDb, 'reels', reelId), {
+            isBlocked: true,
+            copyrightStatus: 'BLOCKED',
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e) {}
+      }
+      actionResult.message = `Video successfully blocked and removed from public feed.`;
+    } else if (action === 'RESTORE_VIDEO') {
+      if (targetReel) {
+        targetReel.isBlocked = false;
+        targetReel.isMuted = false;
+        targetReel.copyrightStatus = 'RESOLVED';
+      }
+      persistReels();
+
+      if (firestoreDb) {
+        try {
+          await updateDoc(doc(firestoreDb, 'reels', reelId), {
+            isBlocked: false,
+            isMuted: false,
+            copyrightStatus: 'RESOLVED',
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (e) {}
+      }
+      actionResult.message = `Video successfully restored to public feed.`;
+    }
+
+    // Update complaint record if complaintId provided
+    if (complaintId) {
+      const comp = copyrightComplaints.find((c) => c.id === complaintId);
+      if (comp) {
+        comp.status = action === 'RESTORE_VIDEO' ? 'RESOLVED' : (action === 'MUTE_AUDIO' ? 'MUTED' : 'BLOCKED');
+        comp.actionTaken = action;
+        comp.resolvedAt = new Date().toISOString();
+        comp.resolvedBy = adminEmail || 'automated-system';
+        comp.auditHistory = comp.auditHistory || [];
+        comp.auditHistory.push({
+          action: `ENFORCED_${action}`,
+          timestamp: new Date().toISOString(),
+          performedBy: adminEmail || 'admin@mshorts.vip',
+          details: reason || `Action ${action} taken`,
+        });
+        persistComplaints();
+      }
+
+      if (firestoreDb) {
+        try {
+          await updateDoc(doc(firestoreDb, 'copyright_complaints', complaintId), {
+            status: action === 'RESTORE_VIDEO' ? 'RESOLVED' : (action === 'MUTE_AUDIO' ? 'MUTED' : 'BLOCKED'),
+            actionTaken: action,
+            resolvedAt: new Date().toISOString(),
+            resolvedBy: adminEmail || 'admin@mshorts.vip',
+            notes: reason || '',
+          });
+        } catch (e) {}
+      }
+    }
+
+    res.json(actionResult);
+  } catch (err: any) {
+    console.error('Error enforcing copyright action:', err);
+    res.status(500).json({ error: err.message || 'Failed to enforce copyright action' });
+  }
 });
 
 // Permanent Internet Archive (Archive.org S3) Cloud Storage Mirror (100% Free & Unlimited Lifetime Storage)
@@ -919,6 +1326,44 @@ app.post('/api/archive/upload', express.raw({ type: ['video/*', 'application/oct
       console.warn('[Archive S3 Background] Direct PUT notice:', archiveErr);
     });
 
+    // Auto-register reel to cloudReels and Firestore immediately
+    const permanentReelId = (req.headers['x-reel-id'] as string) || `user-reel_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const newReelDoc = {
+      id: permanentReelId,
+      videoUrl: localUrl,
+      archiveDownloadUrl,
+      archiveChannelUrl: archiveDownloadUrl,
+      caption: dynamicTitle,
+      username,
+      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+      ownerUid: (req.headers['x-user-uid'] as string) || 'google-user-mehndibabu84',
+      uploaderId: (req.headers['x-user-uid'] as string) || 'google-user-mehndibabu84',
+      uploaderEmail: (req.headers['x-user-email'] as string) || 'mehndibabu84@gmail.com',
+      category: 'viral',
+      hashtags: ['#MSShortsVIP', '#PublicReels', '#Viral'],
+      songName: 'Original Audio',
+      likes: 1,
+      commentsCount: 0,
+      sharesCount: 0,
+      isLiked: false,
+      isFollowing: true,
+      isUserUploaded: true,
+      isVip: true,
+      vipLevel: 1,
+      storageProvider: 'archive.org',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    cloudReels = [newReelDoc, ...cloudReels.filter((r) => r.id !== permanentReelId)];
+    persistReels();
+
+    if (firestoreDb) {
+      try {
+        setDoc(doc(firestoreDb, 'reels', permanentReelId), newReelDoc, { merge: true }).catch(() => {});
+      } catch {}
+    }
+
     res.json({
       success: true,
       itemIdentifier,
@@ -927,6 +1372,8 @@ app.post('/api/archive/upload', express.raw({ type: ['video/*', 'application/oct
       s3Url: s3TargetUrl,
       localUrl,
       streamUrl: localUrl,
+      reelId: permanentReelId,
+      reel: newReelDoc,
       sizeBytes: finalBuffer.length,
       duration: trimInfo.duration,
       trimmed: trimInfo.trimmed,

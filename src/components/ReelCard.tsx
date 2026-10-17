@@ -20,7 +20,11 @@ import {
   AlertTriangle,
   RotateCcw,
   Trash2,
+  MoreVertical,
+  ShieldAlert,
+  Link as LinkIcon,
 } from 'lucide-react';
+import { CopyrightReportModal } from './CopyrightReportModal';
 
 interface ReelCardProps {
   reel: VideoReel;
@@ -98,6 +102,8 @@ export const ReelCard: React.FC<ReelCardProps> = ({
   const [isFollowing, setIsFollowing] = useState<boolean>(reel.isFollowing || false);
   const [showHeartAnim, setShowHeartAnim] = useState<boolean>(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
+  const [showMoreMenu, setShowMoreMenu] = useState<boolean>(false);
+  const [showCopyrightModal, setShowCopyrightModal] = useState<boolean>(false);
   const watchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const watchTimeSecondsRef = useRef<number>(0);
   const loopCountRef = useRef<number>(0);
@@ -1004,6 +1010,53 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           </button>
         )}
 
+        {/* Three-Dot Menu Button (Report Copyright, Copy Link) */}
+        <div className="relative flex flex-col items-center">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMoreMenu((prev) => !prev);
+            }}
+            className="p-3 rounded-full bg-black/50 border border-white/20 text-white backdrop-blur-md hover:bg-black/80 transition-all shadow-xl active:scale-95 cursor-pointer"
+            title="More Options / अधिक विकल्प"
+          >
+            <MoreVertical className="w-5 h-5 text-slate-200" />
+          </button>
+
+          {/* Floating Popup Menu */}
+          {showMoreMenu && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-0 bottom-14 z-40 w-52 bg-slate-900 border border-slate-700/80 rounded-2xl p-1.5 shadow-2xl backdrop-blur-md animate-scale-up text-white flex flex-col gap-1 select-none"
+            >
+              <button
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  setShowCopyrightModal(true);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-left text-xs font-bold text-amber-300 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>कॉपीराइट रिपोर्ट (Report)</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowMoreMenu(false);
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(`${window.location.origin}/?v=${reel.id}`);
+                  }
+                  if (onShare) onShare(reel);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <LinkIcon className="w-4 h-4 text-slate-400 shrink-0" />
+                <span>लिंक कॉपी करें (Copy Link)</span>
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Spinning Record Disk (Clickable to use sound) */}
         <div
           onClick={(e) => {
@@ -1062,6 +1115,14 @@ export const ReelCard: React.FC<ReelCardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Copyright Report Modal */}
+      <CopyrightReportModal
+        isOpen={showCopyrightModal}
+        onClose={() => setShowCopyrightModal(false)}
+        reel={reel}
+        currentUserEmail={authUser?.email}
+      />
     </div>
   );
 };
